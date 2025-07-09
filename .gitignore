@@ -1,0 +1,72 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# === Virtual Environment ===
+env/
+venv/
+ENV/
+VENV/
+.venv/
+.env/
+
+# === Python Environment Files ===
+.env
+.env.*.local
+*.env
+*.ini
+*.cfg
+*.local
+
+# === IDEs and Editors ===
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Sublime
+*.sublime-workspace
+*.sublime-project
+
+# === OS Files ===
+.DS_Store
+Thumbs.db
+
+# === Logs and Misc ===
+*.log
+*.sqlite3
+*.db
+*.pid
+*.bak
+*.swp
+*.tmp
+
+# === Testing ===
+htmlcov/
+.tox/
+.nox/
+.coverage
+coverage.xml
+.pytest_cache/
+nosetests.xml
+test-results.xml
+
+# === Build and Distribution ===
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+MANIFEST
+
+# === Jupyter Notebooks ===
+.ipynb_checkpoints/
+
+# === MyPy, Pyre, Pytype ===
+.mypy_cache/
+.pyre/
+.pytype/
