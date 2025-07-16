@@ -217,21 +217,22 @@
                 <thead>
                     <tr>
                         <th style="width: 5%">No</th>
-                        <th style="width: 20%">Device Info</th>
-                        <th style="width: 10%">Type</th>
-                        <th style="width: 15%">Timestamp</th>
-                        <th style="width: 25%">Location</th>
+                        <th style="width: 16%">Device Info</th> <!-- Reduced from 18% -->
+                        <th style="width: 7%">Type</th>        <!-- Reduced from 8% -->
+                        <th style="width: 10%">Timestamp</th>  <!-- Reduced from 12% -->
+                        <th style="width: 22%">Location</th>   <!-- Reduced from 30% -->
                         {% if device_type != 'solar' %}
-                            <th style="width: 10%">Major/Minor</th>
+                            <th style="width: 7%">Major/Minor</th> <!-- Reduced from 8% -->
                         {% else %}
-                            <th style="width: 10%">Speed (km/h)</th>
+                            <th style="width: 7%">Speed (km/h)</th> <!-- Reduced from 8% -->
                         {% endif %}
-                        <th style="width: 10%">Battery</th>
+                        <th style="width: 8%">Battery</th>     <!-- Reduced from 10% -->
                         {% if device_type != 'solar' %}
-                            <th style="width: 10%">Alarm</th>
+                            <th style="width: 7%">Alarm</th>   <!-- Reduced from 9% -->
                         {% else %}
-                            <th style="width: 10%">Alarm</th>
+                            <th style="width: 7%">Alarm</th>   <!-- Reduced from 9% -->
                         {% endif %}
+                        <th style="width: 12%">Last Activity</th> <!-- New column -->
                     </tr>
                 </thead>
                 <tbody>
@@ -240,30 +241,57 @@
                         <td>{{ (page-1) * 10 + loop.index }}</td>
                         <td>
                             <div><strong>IMEI:</strong> {{ item.payload_id_1 }}</div>
-                            <small class="text-muted device-sn" data-imei="{{ item.payload_id_1 }}">Loading S/N...</small>
+                            {% if device_type == 'solar' %}
+                                <small class="text-muted">S/N: solar tracker</small>
+                            {% else %}
+                                <small class="text-muted device-sn" data-imei="{{ item.payload_id_1 }}">Loading S/N...</small>
+                            {% endif %}
                         </td>
-                        <td>{{ item.payload_id_2 }}</td>
+                        <td>
+                            {% if device_type == 'solar' %}
+                                {% if item.g_sensor_display == "Vibrate" %}
+                                    <span class="badge bg-warning text-dark">{{ item.g_sensor_display }}</span>
+                                {% elif item.g_sensor_display == "Static" %}
+                                    <span class="badge bg-success">{{ item.g_sensor_display }}</span>
+                                {% else %}
+                                    {{ item.g_sensor_display or '-' }}
+                                {% endif %}
+                            {% else %}
+                                {{ item.payload_id_2 }}
+                            {% endif %}
+                        </td>
                         <td>{{ item.timestamp }}</td>
                         <td>
                             {% if item.latitude and item.longitude %}
-                                {{ item.latitude }}, {{ item.longitude }}
-                                <br>
-                                <small class="text-muted location-address" 
-                                       data-lat="{{ item.latitude }}" 
-                                       data-lng="{{ item.longitude }}">
-                                    Loading address...
-                                </small>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="me-2" style="min-width: 0;">
+                                        {{ item.latitude }}, {{ item.longitude }}
+                                        <br>
+                                        <small class="text-muted location-address" 
+                                               data-lat="{{ item.latitude }}" 
+                                               data-lng="{{ item.longitude }}">
+                                            Loading address...
+                                        </small>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-primary show-on-map-btn flex-shrink-0" 
+                                            data-lat="{{ item.latitude }}" 
+                                            data-lng="{{ item.longitude }}"
+                                            title="Show on map">
+                                        <i class="fas fa-map-marker-alt"></i>
+                                    </button>
+                                </div>
                             {% else %}
                                 -
                             {% endif %}
                         </td>
                         <td>
-                            {# Perbaikan untuk menampilkan angka 0 pada kecepatan #}
-                            {% if item.speed_kmh is not none %}
-                                {{ item.speed_kmh }}
-                            {% else %}
-                                -
-                            {% endif %}
+                            <div class="ps-3">
+                                {% if item.speed_kmh is not none %}
+                                    {{ item.speed_kmh }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </div>
                         </td>
                         <td>
                             {% if item.persentase_baterai is not none %}
@@ -274,17 +302,16 @@
                         </td>
                         <td>
                             {% if device_type == 'solar' %}
-                                {# Gunakan field g_sensor_display yang sudah diolah di backend #}
-                                {% if item.g_sensor_display == "Vibrate" %}
-                                    <span class="badge bg-warning text-dark">{{ item.g_sensor_display }}</span>
-                                {% elif item.g_sensor_display == "Static" %}
-                                    <span class="badge bg-success">{{ item.g_sensor_display }}</span>
-                                {% else %}
-                                    {{ item.g_sensor_display or '-' }}
-                                {% endif %}
+                                -
                             {% else %}
-                                {# Logika lama untuk device tipe lain tetap aman #}
                                 {{ item.alarm or '-' }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.last_activity %} 
+                                {{ item.last_activity }}
+                            {% else %}
+                                <span class="text-muted">-</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -422,6 +449,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function getDeviceInfo(imei) {
         try {
+            // Skip API call for solar trackers
+            if (isSolarTracker()) {
+                return 'solar tracker';
+            }
+            
             const response = await fetch(`${getApiBaseUrl()}/device-info/${imei}`);
             const data = await response.json();
             return data.serial_number || 'N/A';
@@ -447,6 +479,62 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const markers = new Map();
     const beaconMarkers = new Map();
+    let tempMarker = null; // For temporary marker
+
+    // Function to show location on map
+    async function showLocationOnMap(lat, lng) {
+        // Scroll to map for better UX
+        document.getElementById('map').scrollIntoView({ behavior: 'smooth' });
+        
+        // Remove existing temp marker
+        if (tempMarker) {
+            map.removeLayer(tempMarker);
+            tempMarker = null;
+        }
+        
+        // Create new temporary marker
+        tempMarker = L.marker([lat, lng], {
+            icon: L.divIcon({
+                className: 'temp-marker',
+                html: '<div class="temp-marker-inner"></div>',
+                iconSize: [20, 20]
+            })
+        }).addTo(map);
+        
+        // Center map on location
+        map.setView([lat, lng], 16);
+        
+        // Add popup with location info
+        try {
+            const response = await fetch(`/reverse-geocode?lat=${lat}&lng=${lng}`);
+            const data = await response.json();
+            const address = data.street_name || data.full_address || 'Address not available';
+            
+            tempMarker.bindPopup(`
+                <div class="text-center">
+                    <strong>Selected Location</strong><br>
+                    ${address}<br>
+                    <small class="text-muted">Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}</small>
+                </div>
+            `).openPopup();
+        } catch (error) {
+            tempMarker.bindPopup(`
+                <div class="text-center">
+                    <strong>Selected Location</strong><br>
+                    Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}
+                </div>
+            `).openPopup();
+        }
+    }
+
+    // Event listener for "Show on Map" buttons
+    document.querySelectorAll('.show-on-map-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const lat = parseFloat(this.dataset.lat);
+            const lng = parseFloat(this.dataset.lng);
+            showLocationOnMap(lat, lng);
+        });
+    });
 
     // Map marker functions
     function addMarker(location, bounds) {
@@ -679,14 +767,14 @@ document.addEventListener('DOMContentLoaded', function() {
         window.location.href = `${getBaseUrl()}?page=1&imei=${imei}`;
     });
 
-    // Initialization
-    loadBeacons();
+// Initialization
+loadBeacons();
     updateMap();
     loadSerialNumbers();
     loadDeviceActivities();
     loadStreetNames();
 
-    // Beacon marker styles
+    // Beacon and temp marker styles
     const style = document.createElement('style');
     style.textContent = `
         .beacon-marker {
@@ -697,6 +785,23 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         .beacon-marker i {
             filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.5));
+        }
+        .temp-marker {
+            background: #ff0000;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        .temp-marker-inner {
+            background: white;
+            border-radius: 50%;
+            width: 8px;
+            height: 8px;
         }
     `;
     document.head.appendChild(style);

@@ -434,3 +434,19 @@ body {
 .btn-group-toggle .btn.active {
     box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.25);
 }
+
+.show-on-map-btn {
+    margin-left: 10px;
+}
+
+.location-address {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+th:last-child, td:last-child {
+    padding-left: 15px;
+    border-left: 1px solid rgba(0,0,0,0.05);
+}
