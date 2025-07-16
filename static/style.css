@@ -410,3 +410,27 @@ body {
     display: block;
     line-height: 1.2;
 }
+
+/* Solar tracker specific styles */
+.solar-panel-icon {
+    color: #FFC107;
+}
+
+.solar-status-card {
+    background-color: #FFF3CD;
+    border-color: #FFECB5;
+}
+
+.solar-speed-value {
+    font-weight: bold;
+    color: #E91E63;
+}
+
+/* Device type switcher */
+.btn-group-toggle .btn {
+    transition: all 0.3s ease;
+}
+
+.btn-group-toggle .btn.active {
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.25);
+}

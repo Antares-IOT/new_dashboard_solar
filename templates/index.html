@@ -5,7 +5,28 @@
 {% endblock %}
 
 {% block content %}
-<!-- Info Boxes -->
+<!-- Device Type Selector -->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <div class="btn-group btn-group-toggle w-100" data-toggle="buttons">
+                    <label class="btn btn-outline-primary {% if not device_type or device_type == 'tracker' %}active{% endif %}">
+                        <input type="radio" name="device-type" id="tracker-type" autocomplete="off" 
+                               {% if not device_type or device_type == 'tracker' %}checked{% endif %}>
+                        <i class="fas fa-satellite-dish me-2"></i> Tracker Devices
+                    </label>
+                    <label class="btn btn-outline-success {% if device_type == 'solar' %}active{% endif %}">
+                        <input type="radio" name="device-type" id="solar-type" autocomplete="off" 
+                               {% if device_type == 'solar' %}checked{% endif %}>
+                        <i class="fas fa-solar-panel me-2"></i> Solar Trackers
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-2 mb-4"> <!-- Changed to row g-2 for consistent spacing -->
     <!-- Total Devices Box -->
     <div class="col">
@@ -200,9 +221,17 @@
                         <th style="width: 10%">Type</th>
                         <th style="width: 15%">Timestamp</th>
                         <th style="width: 25%">Location</th>
-                        <th style="width: 10%">Major/Minor</th>
+                        {% if device_type != 'solar' %}
+                            <th style="width: 10%">Major/Minor</th>
+                        {% else %}
+                            <th style="width: 10%">Speed (km/h)</th>
+                        {% endif %}
                         <th style="width: 10%">Battery</th>
-                        <th style="width: 5%">Alarm</th>
+                        {% if device_type != 'solar' %}
+                            <th style="width: 10%">Alarm</th>
+                        {% else %}
+                            <th style="width: 10%">Alarm</th>
+                        {% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -216,7 +245,7 @@
                         <td>{{ item.payload_id_2 }}</td>
                         <td>{{ item.timestamp }}</td>
                         <td>
-                            {% if item.payload_id_2 == 'GNSS' and item.latitude and item.longitude %}
+                            {% if item.latitude and item.longitude %}
                                 {{ item.latitude }}, {{ item.longitude }}
                                 <br>
                                 <small class="text-muted location-address" 
@@ -224,30 +253,40 @@
                                        data-lng="{{ item.longitude }}">
                                     Loading address...
                                 </small>
-                            {% elif item.payload_id_2 == 'Beacon' and item.location_name %}
-                                {{ item.location_name }}
-                                {% if item.beacon_name %}
-                                    <br><small class="text-muted">({{ item.beacon_name }})</small>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {# Perbaikan untuk menampilkan angka 0 pada kecepatan #}
+                            {% if item.speed_kmh is not none %}
+                                {{ item.speed_kmh }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.persentase_baterai is not none %}
+                                {{ item.persentase_baterai }}%
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if device_type == 'solar' %}
+                                {# Gunakan field g_sensor_display yang sudah diolah di backend #}
+                                {% if item.g_sensor_display == "Vibrate" %}
+                                    <span class="badge bg-warning text-dark">{{ item.g_sensor_display }}</span>
+                                {% elif item.g_sensor_display == "Static" %}
+                                    <span class="badge bg-success">{{ item.g_sensor_display }}</span>
+                                {% else %}
+                                    {{ item.g_sensor_display or '-' }}
                                 {% endif %}
                             {% else %}
-                                -
+                                {# Logika lama untuk device tipe lain tetap aman #}
+                                {{ item.alarm or '-' }}
                             {% endif %}
                         </td>
-                        <td>
-                            {% if item.payload_id_2 == 'Beacon' %}
-                                {{ item.major or '-' }}/{{ item.minor or '-' }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if item.voltage %}
-                                {{ item.voltage }}V ({{ item.persentase_baterai }}%)
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td>{{ item.alarm or '-' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -303,7 +342,96 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize map
+    // Helper functions for device type handling
+    function getCurrentDeviceType() {
+        const checkedRadio = document.querySelector('input[name="device-type"]:checked');
+        return checkedRadio ? checkedRadio.id : 'tracker-type';
+    }
+
+    function isSolarTracker() {
+        return getCurrentDeviceType() === 'solar-type';
+    }
+
+    function getBaseUrl() {
+        return isSolarTracker() ? '/solar-dashboard' : '/dashboard';
+    }
+
+    function getApiBaseUrl() {
+        return isSolarTracker() ? '/solar-tracker' : '';
+    }
+
+    // Device type switcher - reset all filters when switching
+    document.querySelectorAll('input[name="device-type"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            window.location.href = getBaseUrl();
+        });
+    });
+
+    // API call functions
+    async function getLatestDevicePosition(imei) {
+        try {
+            if (isSolarTracker()) {
+                const response = await fetch(`/solar-tracker/data?imei=${imei}&limit=1`);
+                const data = await response.json();
+                if (data.data && data.data.length > 0) {
+                    return { 
+                        gpsData: { data: data.data[0] }, 
+                        heartbeatData: { data: data.data[0] } 
+                    };
+                }
+                return null;
+            } else {
+                const [gpsResponse, heartbeatResponse] = await Promise.all([
+                    fetch(`/gps/${imei}/latest`),
+                    fetch(`/heartbeat/${imei}/latest`)
+                ]);
+                
+                return {
+                    gpsData: await gpsResponse.json(),
+                    heartbeatData: await heartbeatResponse.json()
+                };
+            }
+        } catch (error) {
+            console.error('Error fetching device data:', error);
+            return null;
+        }
+    }
+
+    async function getRegistrationData(imei, startDate, endDate) {
+        if (isSolarTracker()) {
+            let url = `/solar-tracker/data?imei=${imei}`;
+            if (startDate && endDate) {
+                url += `&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+            }
+            const response = await fetch(url);
+            return await response.json();
+        } else {
+            let url = `/registration/${imei}/gps`;
+            if (startDate && endDate) {
+                url += `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+            }
+            const response = await fetch(url);
+            return await response.json();
+        }
+    }
+
+    async function getAllDevices() {
+        const response = await fetch(`${getApiBaseUrl()}/devices`);
+        return await response.json();
+    }
+
+    async function getDeviceInfo(imei) {
+        try {
+            const response = await fetch(`${getApiBaseUrl()}/device-info/${imei}`);
+            const data = await response.json();
+            return data.serial_number || 'N/A';
+        } catch (error) {
+            console.error(`Error fetching S/N for ${imei}:`, error);
+            return 'Error loading S/N';
+        }
+    }
+
+    // Map initialization
     const map = L.map('map', {
         center: [-6.2088, 106.8456],
         zoom: 10,
@@ -315,13 +443,106 @@ document.addEventListener('DOMContentLoaded', function() {
         maxZoom: 19
     }).addTo(map);
 
-    // Force map to update its size
     setTimeout(() => map.invalidateSize(), 100);
 
     const markers = new Map();
     const beaconMarkers = new Map();
 
-    // Add a function to fetch and display beacons
+    // Map marker functions
+    function addMarker(location, bounds) {
+        getDeviceInfo(location.payload_id_1).then(serialNumber => {
+            const marker = L.marker([location.latitude, location.longitude])
+                .bindPopup(`
+                    <div class="device-marker">
+                        <strong>IMEI: ${location.payload_id_1}</strong><br>
+                        <small class="text-muted">S/N: ${serialNumber}</small><br>
+                        Timestamp: ${new Date(location.timestamp).toLocaleString()}
+                    </div>
+                `);
+            markers.set(location.payload_id_1, marker);
+            marker.addTo(map);
+            bounds.push([location.latitude, location.longitude]);
+        });
+    }
+
+    function addDeviceMarker(gpsData, heartbeatData, bounds) {
+        const lastUpdate = new Date(gpsData.timestamp);
+        const isOnline = (new Date() - lastUpdate) < 86400000;
+        
+        getDeviceInfo(gpsData.payload_id_1).then(serialNumber => {
+            const marker = L.marker([gpsData.latitude, gpsData.longitude])
+                .bindPopup(`
+                    <div class="device-marker">
+                        <strong>IMEI: ${gpsData.payload_id_1}</strong><br>
+                        <small class="text-muted">S/N: ${serialNumber}</small><br>
+                        Last Update: ${new Date(gpsData.timestamp).toLocaleString()}<br>
+                        ${heartbeatData ? `Battery: ${heartbeatData.voltage}V (${heartbeatData.persentase_baterai}%)` : ''}<br>
+                        <div class="status ${isOnline ? 'status-online' : 'status-offline'}">
+                            ${isOnline ? 'Online' : 'Offline'}
+                        </div>
+                    </div>
+                `);
+            markers.set(gpsData.payload_id_1, marker);
+            marker.addTo(map);
+            bounds.push([gpsData.latitude, gpsData.longitude]);
+        });
+    }
+
+    async function updateMap() {
+        markers.forEach(marker => map.removeLayer(marker));
+        markers.clear();
+
+        const imei = document.getElementById('deviceSelect').value;
+        const startDate = document.querySelector('[name="start_date"]').value;
+        const endDate = document.querySelector('[name="end_date"]').value;
+        
+        try {
+            if (imei) {
+                if (startDate && endDate) {
+                    const data = await getRegistrationData(imei, startDate, endDate);
+                    if (data.data && data.data.length > 0) {
+                        const bounds = [];
+                        data.data.forEach(location => {
+                            if (location.latitude && location.longitude) {
+                                addMarker(location, bounds);
+                            }
+                        });
+                        if (bounds.length > 0) map.fitBounds(bounds);
+                    }
+                } else {
+                    const deviceData = await getLatestDevicePosition(imei);
+                    if (deviceData && deviceData.gpsData.data) {
+                        const bounds = [];
+                        addDeviceMarker(deviceData.gpsData.data, deviceData.heartbeatData.data, bounds);
+                        if (bounds.length > 0) map.fitBounds(bounds);
+                    }
+                }
+            } else {
+                try {
+                    const { devices } = await getAllDevices();
+                    const bounds = [];
+                    
+                    await Promise.all(devices.map(async (device) => {
+                        try {
+                            const deviceData = await getLatestDevicePosition(device.imei);
+                            if (deviceData?.gpsData?.data?.latitude && deviceData?.gpsData?.data?.longitude) {
+                                addDeviceMarker(deviceData.gpsData.data, deviceData.heartbeatData.data, bounds);
+                            }
+                        } catch (error) {
+                            console.error(`Error fetching data for device ${device.imei}:`, error);
+                        }
+                    }));
+                    
+                    if (bounds.length > 0) map.fitBounds(bounds);
+                } catch (error) {
+                    console.error('Error fetching devices:', error);
+                }
+            }
+        } catch (error) {
+            console.error('Error updating map:', error);
+        }
+    }
+
     async function loadBeacons() {
         try {
             const response = await fetch('/beacons');
@@ -360,184 +581,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function getLatestDevicePosition(imei) {
-        try {
-            const [gpsResponse, heartbeatResponse] = await Promise.all([
-                fetch(`/gps/${imei}/latest`),
-                fetch(`/heartbeat/${imei}/latest`)
-            ]);
-            
-            const [gpsData, heartbeatData] = await Promise.all([
-                gpsResponse.json(),
-                heartbeatResponse.json()
-            ]);
-
-            return { gpsData, heartbeatData };
-        } catch (error) {
-            console.error('Error fetching device data:', error);
-            return null;
-        }
-    }
-
-    async function updateMap() {
-        // Clear existing device markers
-        markers.forEach(marker => map.removeLayer(marker));
-        markers.clear();
-
-        // Don't clear beacon markers as they are static
-        
-        const imei = document.getElementById('deviceSelect').value;
-        const startDate = document.querySelector('[name="start_date"]').value;
-        const endDate = document.querySelector('[name="end_date"]').value;
-        
-        try {
-            // Clear existing markers
-            markers.forEach(marker => map.removeLayer(marker));
-            markers.clear();
-
-            if (imei) {
-                // Single device mode
-                if (startDate && endDate) {
-                    // Get GPS data with date range
-                    const response = await fetch(`/registration/${imei}/gps?start_date=${startDate}&end_date=${endDate}`);
-                    const data = await response.json();
-                    
-                    if (data.data && data.data.length > 0) {
-                        const bounds = [];
-                        data.data.forEach(location => {
-                            if (location.latitude && location.longitude) {
-                                addMarker(location, bounds);
-                            }
-                        });
-                        if (bounds.length > 0) map.fitBounds(bounds);
-                    }
-                } else {
-                    // Get latest position for single device
-                    const deviceData = await getLatestDevicePosition(imei);
-                    if (deviceData && deviceData.gpsData.data) {
-                        const bounds = [];
-                        addDeviceMarker(deviceData.gpsData.data, deviceData.heartbeatData.data, bounds);
-                        if (bounds.length > 0) map.fitBounds(bounds);
-                    }
-                }
-            } else {
-                // All devices mode - show latest positions
-                try {
-                    const devicesResponse = await fetch('/devices');
-                    const { devices } = await devicesResponse.json();
-                    const bounds = [];
-                    
-                    await Promise.all(devices.map(async (device) => {
-                        try {
-                            const [gpsResponse, heartbeatResponse] = await Promise.all([
-                                fetch(`/gps/${device.imei}/latest`),
-                                fetch(`/heartbeat/${device.imei}/latest`)
-                            ]);
-                            
-                            const [gpsData, heartbeatData] = await Promise.all([
-                                gpsResponse.json(),
-                                heartbeatResponse.json()
-                            ]);
-                            
-                            if (gpsData.data && gpsData.data.latitude && gpsData.data.longitude) {
-                                addDeviceMarker(gpsData.data, heartbeatData.data, bounds);
-                            }
-                        } catch (error) {
-                            console.error(`Error fetching data for device ${device.imei}:`, error);
-                        }
-                    }));
-                    
-                    if (bounds.length > 0) map.fitBounds(bounds);
-                } catch (error) {
-                    console.error('Error fetching devices:', error);
-                }
-            }
-        } catch (error) {
-            console.error('Error updating map:', error);
-        }
-    }
-
-    // Add function to get device info from cache
-    async function getDeviceInfo(imei) {
-        try {
-            const response = await fetch(`/device-info/${imei}`);
-            const data = await response.json();
-            return data.serial_number || 'N/A';
-        } catch (error) {
-            console.error(`Error fetching S/N for ${imei}:`, error);
-            return 'Error loading S/N';
-        }
-    }
-
-    function addMarker(location, bounds) {
-        getDeviceInfo(location.payload_id_1).then(serialNumber => {
-            const marker = L.marker([location.latitude, location.longitude])
-                .bindPopup(`
-                    <div class="device-marker">
-                        <strong>IMEI: ${location.payload_id_1}</strong><br>
-                        <small class="text-muted">S/N: ${serialNumber}</small><br>
-                        Timestamp: ${new Date(location.timestamp).toLocaleString()}
-                    </div>
-                `);
-            markers.set(location.payload_id_1, marker);
-            marker.addTo(map);
-            bounds.push([location.latitude, location.longitude]);
-        });
-    }
-
-    function addDeviceMarker(gpsData, heartbeatData, bounds) {
-        const lastUpdate = new Date(gpsData.timestamp);
-        const isOnline = (new Date() - lastUpdate) < 86400000; // 24 hours (24 * 60 * 60 * 1000)
-        
-        getDeviceInfo(gpsData.payload_id_1).then(serialNumber => {
-            const marker = L.marker([gpsData.latitude, gpsData.longitude])
-                .bindPopup(`
-                    <div class="device-marker">
-                        <strong>IMEI: ${gpsData.payload_id_1}</strong><br>
-                        <small class="text-muted">S/N: ${serialNumber}</small><br>
-                        Last Update: ${new Date(gpsData.timestamp).toLocaleString()}<br>
-                        ${heartbeatData ? `Battery: ${heartbeatData.voltage}V (${heartbeatData.persentase_baterai}%)` : ''}<br>
-                        <div class="status ${isOnline ? 'status-online' : 'status-offline'}">
-                            ${isOnline ? 'Online' : 'Offline'}
-                        </div>
-                    </div>
-                `);
-            markers.set(gpsData.payload_id_1, marker);
-            marker.addTo(map);
-            bounds.push([gpsData.latitude, gpsData.longitude]);
-        });
-    }
-
-    // Load beacons when page loads
-    loadBeacons();
-    
-    // Update map with device locations
-    updateMap();
-    
-    document.getElementById('deviceFilterForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const imei = document.getElementById('deviceSelect').value;
-        if (imei) {
-            updateBeaconData();
-        }
-        window.location.href = `/dashboard?page=1&imei=${imei}`;
-    });
-
-    document.getElementById('dateFilterForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const startDate = this.querySelector('[name="start_date"]').value;
-        const endDate = this.querySelector('[name="end_date"]').value;
-        const imei = document.getElementById('deviceSelect').value;
-        window.location.href = `/dashboard?page=1&imei=${imei}&start_date=${startDate}&end_date=${endDate}`;
-    });
-
-    document.getElementById('resetDateBtn').addEventListener('click', function() {
-        const imei = document.getElementById('deviceSelect').value;
-        window.location.href = `/dashboard?page=1&imei=${imei}`;
-    });
-
-    // Add this to your existing DOMContentLoaded handler
-    const loadSerialNumbers = async () => {
+    // Data loading functions
+    async function loadSerialNumbers() {
         const seenImeis = new Set();
         const elements = document.querySelectorAll('.device-sn');
         
@@ -547,63 +592,52 @@ document.addEventListener('DOMContentLoaded', function() {
             seenImeis.add(imei);
             
             try {
-                const response = await fetch(`/device-info/${imei}`);
-                const data = await response.json();
-                // Update all elements with this IMEI
+                const serialNumber = await getDeviceInfo(imei);
                 document.querySelectorAll(`.device-sn[data-imei="${imei}"]`)
                     .forEach(el => {
-                        el.textContent = `S/N: ${data.serial_number || 'N/A'}`;
+                        el.textContent = `S/N: ${serialNumber}`;
                     });
             } catch (error) {
-                console.error(`Error loading S/N for ${imei}:`, error);
                 document.querySelectorAll(`.device-sn[data-imei="${imei}"]`)
                     .forEach(el => {
                         el.textContent = 'Error loading S/N';
                     });
             }
         }
-    };
+    }
 
-    const loadDeviceActivities = async () => {
+    async function loadDeviceActivities() {
         try {
             const imei = document.getElementById('deviceSelect').value;
             let activities = {};
             
             if (imei) {
-                // Single device mode
-                const response = await fetch(`/device-activity/${imei}`);
+                const response = await fetch(`${getApiBaseUrl()}/device-activity/${imei}`);
                 const data = await response.json();
                 activities[data.imei] = data.last_activity;
             } else {
-                // All devices mode
-                const response = await fetch('/all-device-activities');
+                const response = await fetch(`${getApiBaseUrl()}/all-device-activities`);
                 const data = await response.json();
                 data.devices.forEach(device => {
                     activities[device.imei] = device.last_activity;
                 });
             }
             
-            // Update all activity elements - simplified display text
             document.querySelectorAll('.device-activity').forEach(elem => {
                 const imei = elem.dataset.imei;
                 const activity = activities[imei] || 'No Activity';
-                elem.textContent = activity; // Just show the activity text without prefix
+                elem.textContent = activity;
                 elem.classList.remove('text-success', 'text-danger');
                 elem.classList.add(activity !== 'No Activity' ? 'text-success' : 'text-danger');
             });
         } catch (error) {
-            console.error('Error loading device activities:', error);
             document.querySelectorAll('.device-activity').forEach(el => {
                 el.textContent = 'Error loading activity';
             });
         }
-    };
+    }
 
-    // Call both functions to load data
-    loadSerialNumbers();
-    loadDeviceActivities();
-
-    const loadStreetNames = async () => {
+    async function loadStreetNames() {
         const elements = document.querySelectorAll('.location-address');
         
         for (const elem of elements) {
@@ -615,135 +649,44 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
                 if (data.street_name) {
                     elem.textContent = data.street_name;
-                    elem.title = data.full_address; // Show full address on hover
+                    elem.title = data.full_address;
                 } else {
                     elem.textContent = 'Address not found';
                 }
             } catch (error) {
-                console.error(`Error loading address for ${lat},${lng}:`, error);
                 elem.textContent = 'Error loading address';
             }
         }
-    };
-
-    // Add to your existing function calls
-    loadStreetNames();
-
-    async function updateBeaconData() {
-        const imei = document.getElementById('deviceSelect').value;
-        if (!imei) return;
-        
-        try {
-            const response = await fetch(`/registration/beacon-data?imei=${imei}`);
-            const data = await response.json();
-            
-            // Update beacon data in table
-            document.querySelectorAll('tr').forEach(row => {
-                const payloadType = row.querySelector('td:nth-child(3)');
-                if (payloadType && payloadType.textContent.trim() === 'Beacon') {
-                    const imeiCell = row.querySelector('td:nth-child(2)');
-                    const rowImei = imeiCell?.textContent.trim().split(':')[1]?.trim();
-                    
-                    if (rowImei === imei) {
-                        const beaconData = data.data.find(b => 
-                            b.timestamp === row.querySelector('td:nth-child(4)').textContent.trim()
-                        );
-                        
-                        if (beaconData) {
-                            // Update Major/Minor cell
-                            const majorMinorCell = row.querySelector('td:nth-child(6)');
-                            if (beaconData.Major && beaconData.Minor) {
-                                majorMinorCell.textContent = `${beaconData.Major}/${beaconData.Minor}`;
-                            }
-                        }
-                    }
-                }
-            });
-        } catch (error) {
-            console.error('Error fetching beacon data:', error);
-        }
     }
 
-    // Add new function to handle beacon data
-    async function processBeaconData(imei) {
-        try {
-            // Get beacon registration data
-            const beaconResponse = await fetch(`/beacon/registration?imei=${imei}`);
-            const beaconData = await beaconResponse.json();
-            
-            if (beaconData.status === 'success' && beaconData.data.length > 0) {
-                // Process each beacon record
-                for (const record of beaconData.data) {
-                    if (record.major && record.minor) {
-                        // Get location info for this beacon
-                        const locationResponse = await fetch(`/beacon/location/${record.major}/${record.minor}`);
-                        const locationData = await locationResponse.json();
-                        
-                        if (locationData.status === 'success') {
-                            // Update table cell with location info
-                            const rows = document.querySelectorAll('tr');
-                            rows.forEach(row => {
-                                const payloadType = row.querySelector('td:nth-child(3)');
-                                const timestampCell = row.querySelector('td:nth-child(4)');
-                                if (payloadType?.textContent.trim() === 'Beacon' && 
-                                    timestampCell?.textContent.trim() === record.timestamp) {
-                                    
-                                    // Update location column
-                                    const locationCell = row.querySelector('td:nth-child(5)');
-                                    locationCell.innerHTML = `
-                                        ${locationData.data.location_name}<br>
-                                        <small class="text-muted">(${locationData.data.beacon_name})</small>
-                                    `;
-
-                                    // Add marker to map if coordinates exist
-                                    if (locationData.data.latitude && locationData.data.longitude) {
-                                        const marker = L.marker(
-                                            [locationData.data.latitude, locationData.data.longitude],
-                                            {
-                                                icon: L.divIcon({
-                                                    className: 'beacon-marker',
-                                                    html: '<i class="fas fa-broadcast-tower text-primary"></i>',
-                                                    iconSize: [20, 20]
-                                                })
-                                            }
-                                        ).addTo(map);
-
-                                        marker.bindPopup(`
-                                            <strong>${locationData.data.beacon_name}</strong><br>
-                                            Location: ${locationData.data.location_name}<br>
-                                            Major: ${record.major}<br>
-                                            Minor: ${record.minor}<br>
-                                            Detected: ${record.timestamp}
-                                        `);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Error processing beacon data:', error);
-        }
-    }
-
-    // Modify existing device filter handler
-    document.getElementById('deviceFilterForm').addEventListener('submit', async function(e) {
+    // Form handlers
+    document.getElementById('deviceFilterForm').addEventListener('submit', function(e) {
         e.preventDefault();
         const imei = document.getElementById('deviceSelect').value;
-        if (imei) {
-            await updateBeaconData(imei);
-        }
-        window.location.href = `/dashboard?page=1&imei=${imei}`;
+        window.location.href = `${getBaseUrl()}?page=1&imei=${imei}`;
     });
 
-    // Initial beacon processing for selected device
-    const selectedImei = document.getElementById('deviceSelect').value;
-    if (selectedImei) {
-        processBeaconData(selectedImei);
-    }
+    document.getElementById('dateFilterForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const startDate = this.querySelector('[name="start_date"]').value;
+        const endDate = this.querySelector('[name="end_date"]').value;
+        const imei = document.getElementById('deviceSelect').value;
+        window.location.href = `${getBaseUrl()}?page=1&imei=${imei}&start_date=${startDate}&end_date=${endDate}`;
+    });
 
-    // Add beacon marker styles
+    document.getElementById('resetDateBtn').addEventListener('click', function() {
+        const imei = document.getElementById('deviceSelect').value;
+        window.location.href = `${getBaseUrl()}?page=1&imei=${imei}`;
+    });
+
+    // Initialization
+    loadBeacons();
+    updateMap();
+    loadSerialNumbers();
+    loadDeviceActivities();
+    loadStreetNames();
+
+    // Beacon marker styles
     const style = document.createElement('style');
     style.textContent = `
         .beacon-marker {

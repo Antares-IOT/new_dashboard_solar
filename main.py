@@ -125,6 +125,107 @@ async def dashboard(
                     print(f"Error processing beacon data: {str(e)}")
         
         return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "data": current_data,
+            "page": page,
+            "total_pages": total_pages,
+            "total_items": total_items,
+            "devices": devices,
+            "selected_imei": imei or "",
+            "start_date": start_date or "",
+            "end_date": end_date or "",
+            "now": datetime.now().strftime('%Y-%m-%dT%H:%M'),
+            "device_status": device_status,
+            "device_type": "tracker"  # Add this line to identify regular tracker
+        }
+    )
+    
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "message": "No data found"
+        }
+    )
+
+@app.get("/solar-dashboard", response_class=HTMLResponse)
+async def solar_dashboard(
+    request: Request, 
+    page: int = 1,
+    imei: str = None,
+    start_date: str = None,
+    end_date: str = None
+):
+    devices = db.get_solar_tracker_devices()
+    device_status = None
+    data = None
+
+    # Get default last update data
+    default_device_data = []
+    if not imei and not start_date and not end_date:
+        for device in devices:
+            device_imei = device['imei']
+            last_data = db.get_solar_tracker_data(imei=device_imei, limit=1)
+            if last_data:
+                default_device_data.extend(last_data)
+        data = default_device_data
+    else:
+        # Handle filtered data
+        if imei:
+            # Get device status if specific device selected
+            last_data = db.get_solar_tracker_data(imei=imei, limit=1)
+            
+            if last_data:
+                device_status = {
+                    'voltage': last_data[0].get('voltage'),
+                    'persentase_baterai': last_data[0].get('persentase_baterai'),
+                    'timestamp': last_data[0].get('timestamp'),
+                    'is_online': (datetime.now() - datetime.strptime(last_data[0]['timestamp'], '%Y-%m-%d %H:%M:%S')).total_seconds() < 86400  # 24 hours
+                }
+            
+            # Get filtered data by date range if specified
+            if start_date and end_date:
+                try:
+                    start_dt = datetime.strptime(start_date, '%Y-%m-%dT%H:%M')
+                    end_dt = datetime.strptime(end_date, '%Y-%m-%dT%H:%M')
+                    data = db.get_solar_tracker_data(imei=imei, start_date=start_dt, end_date=end_dt)
+                except ValueError:
+                    data = db.get_solar_tracker_data(imei=imei)
+            else:
+                data = db.get_solar_tracker_data(imei=imei)
+        else:
+            # Get all data with optional date filter
+            if start_date and end_date:
+                try:
+                    start_dt = datetime.strptime(start_date, '%Y-%m-%dT%H:%M')
+                    end_dt = datetime.strptime(end_date, '%Y-%m-%dT%H:%M')
+                    data = db.get_solar_tracker_data(start_date=start_dt, end_date=end_dt)
+                except ValueError:
+                    data = db.get_solar_tracker_data()
+            else:
+                data = db.get_solar_tracker_data()
+
+    if data:
+        # Pagination logic
+        ITEMS_PER_PAGE = 10
+        total_items = len(data)
+        total_pages = ceil(total_items / ITEMS_PER_PAGE)
+        start_idx = (page - 1) * ITEMS_PER_PAGE
+        end_idx = start_idx + ITEMS_PER_PAGE
+        current_data = data[start_idx:end_idx]
+
+        for item in current_data:
+            g_status = item.get('g_sensor_status')
+            if g_status == 1:
+                item['g_sensor_display'] = "Vibrate"
+            elif g_status == 0:
+                item['g_sensor_display'] = "Static"
+            else:
+                item['g_sensor_display'] = "-"
+        
+        return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
@@ -138,6 +239,7 @@ async def dashboard(
                 "end_date": end_date or "",
                 "now": datetime.now().strftime('%Y-%m-%dT%H:%M'),
                 "device_status": device_status,
+                "device_type": "solar"
             }
         )
     
@@ -145,7 +247,7 @@ async def dashboard(
         "error.html",
         {
             "request": request,
-            "message": "No data found"
+            "message": "No solar tracker data found"
         }
     )
 
@@ -275,6 +377,48 @@ async def export_excel(
         print(f"Export error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
+
+# Add these new routes for solar tracker
+@app.get("/solar-export-excel")
+async def solar_export_excel(
+    imei: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Export solar tracker data to Excel"""
+    try:
+        if imei:
+            if start_date and end_date:
+                try:
+                    start_dt = datetime.strptime(start_date, '%Y-%m-%dT%H:%M')
+                    end_dt = datetime.strptime(end_date, '%Y-%m-%dT%H:%M')
+                    data = db.get_solar_tracker_data(imei=imei, start_date=start_dt, end_date=end_dt)
+                except ValueError:
+                    data = db.get_solar_tracker_data(imei=imei)
+            else:
+                data = db.get_solar_tracker_data(imei=imei)
+        else:
+            if start_date and end_date:
+                try:
+                    start_dt = datetime.strptime(start_date, '%Y-%m-%dT%H:%M')
+                    end_dt = datetime.strptime(end_date, '%Y-%m-%dT%H:%M')
+                    data = db.get_solar_tracker_data(start_date=start_dt, end_date=end_dt)
+                except ValueError:
+                    data = db.get_solar_tracker_data()
+            else:
+                data = db.get_solar_tracker_data()
+
+        if not data:
+            raise HTTPException(status_code=404, detail="No solar tracker data found to export")
+
+        # Convert to DataFrame and process as before
+        df = pd.DataFrame(data)
+        # ... rest of your export logic ...
+
+    except Exception as e:
+        print(f"Solar export error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Solar export failed: {str(e)}")
+
 @app.get("/geofence", response_class=HTMLResponse)
 async def geofence_page(request: Request):
     """Render geofence management page"""
@@ -284,4 +428,4 @@ async def geofence_page(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5010)
+    uvicorn.run(app, host="0.0.0.0", port=5024)

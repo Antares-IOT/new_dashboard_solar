@@ -937,11 +937,10 @@ def get_solar_tracker_devices():
 def get_solar_tracker_data(
     imei: Optional[str] = None,
     start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None,
+    limit: Optional[int] = None
 ):
-    """
-    Mengambil data solar tracker dengan filter opsional untuk IMEI dan rentang tanggal.
-    """
+    """Mengambil data solar tracker dengan filter opsional."""
     connection = create_solar_connection()
     if connection is None: return None
 
@@ -951,14 +950,13 @@ def get_solar_tracker_data(
                 SELECT
                     d.imei AS payload_id_1, 'Solar Tracker' AS payload_id_2,
                     lt.latitude, lt.longitude, lt.recorded_at AS timestamp,
-                    dh.voltage_percent AS persentase_baterai, dh.gsm_signal AS alarm,
+                    dh.voltage_percent AS persentase_baterai, dh.g_sensor_active AS g_sensor_status,
                     lt.speed_kmh
                 FROM devices d
                 LEFT JOIN location_telemetry lt ON d.id = lt.device_id
                 LEFT JOIN device_health dh ON d.id = dh.device_id AND lt.recorded_at = dh.recorded_at
             """
             
-            # Membuat klausa WHERE secara dinamis
             where_clauses = ["(lt.recorded_at IS NOT NULL OR dh.recorded_at IS NOT NULL)"]
             params = []
 
@@ -973,12 +971,15 @@ def get_solar_tracker_data(
             if where_clauses:
                 sql += " WHERE " + " AND ".join(where_clauses)
             
-            sql += " ORDER BY lt.recorded_at DESC;"
+            sql += " ORDER BY lt.recorded_at DESC"
+            
+            if limit:
+                sql += " LIMIT %s"
+                params.append(limit)
             
             cursor.execute(sql, tuple(params))
             result = cursor.fetchall()
 
-            # Format timestamp
             for row in result:
                 if row.get('timestamp') and isinstance(row['timestamp'], datetime):
                     row['timestamp'] = row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
