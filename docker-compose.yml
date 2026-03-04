@@ -1,8 +1,8 @@
 version: "3.9"
 
 services:
-  portfolio:
-    image: portfolio:latest
+  new_dashboard_solar:
+    image: new_dashboard_solar:latest
     build: .
     ports:
       - "5028:5028"
