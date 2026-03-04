@@ -182,6 +182,48 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const markerGroup = L.featureGroup().addTo(map);
 
+    // --- Kontrol Utara / Selatan (center map to northernmost / southernmost marker) ---
+    const NorthSouthControl = L.Control.extend({
+        onAdd: function(map) {
+            const container = L.DomUtil.create('div', 'leaflet-control-ns leaflet-bar');
+
+            const btnNorth = L.DomUtil.create('a', 'ns-btn ns-north', container);
+            btnNorth.href = '#';
+            btnNorth.title = 'Pusatkan ke titik paling Utara';
+            btnNorth.innerText = 'Utara';
+
+            const btnSouth = L.DomUtil.create('a', 'ns-btn ns-south', container);
+            btnSouth.href = '#';
+            btnSouth.title = 'Pusatkan ke titik paling Selatan';
+            btnSouth.innerText = 'Selatan';
+
+            L.DomEvent.disableClickPropagation(container);
+            L.DomEvent.on(btnNorth, 'click', L.DomEvent.stop).on(btnNorth, 'click', () => centerExtreme('north'));
+            L.DomEvent.on(btnSouth, 'click', L.DomEvent.stop).on(btnSouth, 'click', () => centerExtreme('south'));
+
+            return container;
+        }
+    });
+    map.addControl(new NorthSouthControl({ position: 'topright' }));
+
+    function centerExtreme(direction) {
+        const layers = markerGroup.getLayers().filter(l => l && typeof l.getLatLng === 'function');
+        if (!layers.length) return;
+
+        let target = layers[0];
+        layers.forEach(l => {
+            const lat = l.getLatLng().lat;
+            const targetLat = target.getLatLng().lat;
+            if ((direction === 'north' && lat > targetLat) || (direction === 'south' && lat < targetLat)) {
+                target = l;
+            }
+        });
+
+        const latlng = target.getLatLng();
+        map.panTo(latlng, { animate: true, duration: 0.6 });
+        if (typeof target.openPopup === 'function') target.openPopup();
+    }
+
     try {
 async function fetchGeofenceData() {
 
@@ -339,5 +381,34 @@ displayData.forEach(item => {
 
 {% block head_extra %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<style>
+  /* North / South control style */
+  .leaflet-control-ns {
+    display: flex;
+    flex-direction: column;
+    background: rgba(255,255,255,0.95);
+    border-radius: 6px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.2);
+    overflow: hidden;
+    font-size: 12px;
+  }
+  .leaflet-control-ns .ns-btn {
+    display: block;
+    padding: 6px 8px;
+    color: #222;
+    text-decoration: none;
+    text-align: center;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    cursor: pointer;
+    min-width: 56px;
+  }
+  .leaflet-control-ns .ns-btn:last-child { border-bottom: none; }
+  .leaflet-control-ns .ns-btn:hover { background: #f4f4f4; color: #000; }
+  .leaflet-control-ns .ns-north::after { content: ' ↑'; margin-left: 6px; }
+  .leaflet-control-ns .ns-south::after { content: ' ↓'; margin-left: 6px; }
+  @media (max-width: 576px) {
+    .leaflet-control-ns { font-size: 11px; min-width: 48px; }
+  }
+</style>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 {% endblock %}

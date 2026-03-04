@@ -939,7 +939,7 @@ def get_solar_tracker_devices():
     if connection is None: return []
     try:
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
-            sql = "SELECT imei, imei AS serial_number FROM devices ORDER BY last_seen_at DESC"
+            sql = "SELECT imei, device_model AS serial_number FROM devices ORDER BY last_seen_at DESC"
             cursor.execute(sql)
             return cursor.fetchall()
     except Exception as e:

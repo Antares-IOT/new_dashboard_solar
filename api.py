@@ -9,7 +9,7 @@ from LLM_Logic.query_router import handle_query
 
 app = FastAPI(title="Device Registration API")
 
-GOOGLE_MAPS_API_KEY = "AIzaSyAdidNhffYHTMN60gs6oiXcqpyrmE8vpf0"  # Ganti dengan API key Anda
+GOOGLE_MAPS_API_KEY = "AIzaSyAdidNhffYHTMN60gs6oiXcqpyrmE8vpf0"  
 
 class Device(BaseModel):
     imei: str
@@ -481,26 +481,32 @@ async def get_address(lat: float, lng: float):
                 "full_address": f"Inside {geofence_name} Area"
             }
         
-        # If not in geofence, get street address from Google Maps
-        url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={GOOGLE_MAPS_API_KEY}"
-        response = requests.get(url)
+        # If not in geofence, get street address from OpenStreetMap Nominatim (free)
+        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1"
+        headers = {"User-Agent": "SolarDashboard/1.0"}
+        response = requests.get(url, headers=headers)
         data = response.json()
         
-        if data["status"] == "OK":
-            address_components = data["results"][0]["address_components"]
-            street_name = None
-            city = None
+        if "error" not in data and data.get("address"):
+            address = data["address"]
             
             # Extract street name and city
-            for component in address_components:
-                if "route" in component["types"]:
-                    street_name = component["long_name"]
-                if "administrative_area_level_2" in component["types"]:
-                    city = component["long_name"]
+            street_name = (
+                address.get("road")
+                or address.get("village")
+                or address.get("suburb")
+                or address.get("neighbourhood")
+            )
+            city = (
+                address.get("city")
+                or address.get("town")
+                or address.get("county")
+                or address.get("city_district")
+            )
             
-            # If no specific street found, use formatted address
+            # If no specific street found, use display_name
             if not street_name:
-                street_name = data["results"][0]["formatted_address"].split(',')[0]
+                street_name = data.get("display_name", "").split(',')[0]
             
             location_text = f"{street_name}"
             if city:
@@ -508,10 +514,12 @@ async def get_address(lat: float, lng: float):
             
             return {
                 "street_name": location_text,
-                "full_address": data["results"][0]["formatted_address"]
+                "full_address": data.get("display_name", location_text)
             }
         else:
-            return {"error": "No results found"}
+            error_msg = data.get("error", "No results found")
+            print(f"[Geocode Error] Message: {error_msg}, Coords: ({lat}, {lng})")
+            return {"error": f"Geocoding failed: {error_msg}"}
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Geocoding error: {str(e)}")

@@ -10,12 +10,13 @@ from datetime import datetime, timedelta
 import os
 import pandas as pd
 import requests
+import time
 from io import BytesIO
 
 GOOGLE_MAPS_API_KEY = api.GOOGLE_MAPS_API_KEY
 
 def reverse_geocode(lat, lng, cache: dict) -> str:
-    """Convert lat/lng to street name using Google Maps API with cache."""
+    """Convert lat/lng to street name using OpenStreetMap Nominatim API with cache."""
     # Round to 4 decimal places for cache key (~11m accuracy)
     cache_key = (round(lat, 4), round(lng, 4))
     if cache_key in cache:
@@ -28,29 +29,37 @@ def reverse_geocode(lat, lng, cache: dict) -> str:
             cache[cache_key] = geofence_name
             return geofence_name
         
-        url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={GOOGLE_MAPS_API_KEY}"
-        response = requests.get(url, timeout=5)
+        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1"
+        headers = {"User-Agent": "SolarDashboard/1.0"}
+        response = requests.get(url, headers=headers, timeout=5)
         data = response.json()
         
-        if data.get("status") == "OK":
-            address_components = data["results"][0]["address_components"]
-            street_name = None
-            city = None
+        if "error" not in data and data.get("address"):
+            address = data["address"]
             
-            for component in address_components:
-                if "route" in component["types"]:
-                    street_name = component["long_name"]
-                if "administrative_area_level_2" in component["types"]:
-                    city = component["long_name"]
+            street_name = (
+                address.get("road")
+                or address.get("village")
+                or address.get("suburb")
+                or address.get("neighbourhood")
+            )
+            city = (
+                address.get("city")
+                or address.get("town")
+                or address.get("county")
+                or address.get("city_district")
+            )
             
             if not street_name:
-                street_name = data["results"][0]["formatted_address"].split(',')[0]
+                street_name = data.get("display_name", "").split(',')[0]
             
             location_text = street_name
             if city:
                 location_text += f", {city}"
             
             cache[cache_key] = location_text
+            # Nominatim rate limit: 1 request per second
+            time.sleep(1)
             return location_text
     except Exception as e:
         print(f"Reverse geocode error for ({lat}, {lng}): {e}")
@@ -509,7 +518,7 @@ async def solar_export_excel(
         
         # Reorder and rename columns
         columns_order = [
-            'payload_id_1', 'payload_id_2', 'timestamp',
+            'payload_id_1', 'device_model', 'payload_id_2', 'timestamp',
             'latitude', 'longitude', 'location', 'persentase_baterai',
             'speed_kmh', 'last_activity', 'alarm', 'g_sensor_status',
             'is_charging'
@@ -517,6 +526,7 @@ async def solar_export_excel(
         
         column_names = {
             'payload_id_1': 'IMEI',
+            'device_model': 'Device Model',
             'payload_id_2': 'Type',
             'timestamp': 'Timestamp',
             'latitude': 'Latitude',
