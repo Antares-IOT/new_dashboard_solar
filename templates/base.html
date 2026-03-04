@@ -4,125 +4,630 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IoT Dashboard</title>
-    <!-- Add favicon -->
     <link rel="shortcut icon" href="{{ url_for('static', path='/favicon.ico') }}">
-    <!-- Bootstrap -->
+    
+    <script>
+        // This runs before the page renders to set the state instantly.
+        if (localStorage.getItem('sidebarState') === 'collapsed') {
+            document.documentElement.classList.add('sidebar-collapsed');
+        }
+    </script>
+    
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
-    <!-- Leaflet -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <!-- Leaflet Draw -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
-    <!-- Custom CSS -->
     <link href="{{ url_for('static', path='/style.css') }}?v=1.0" rel="stylesheet">
     {% block head_extra %}{% endblock %}
+    
     <style>
         :root {
-            --primary-color: #0d6efd;
-            --secondary-color: #e9ecef;
+            --primary-color: #1f61c4;
+            --sidebar-width: 250px;
+            --transition-speed: 0.3s;
         }
-        .navbar {
-            background-color: var(--primary-color) !important;
+        body {
+            overflow-x: hidden;
         }
-        .page-item.active .page-link {
-            background-color: var(--primary-color);
-            border-color: var(--primary-color);
+
+        #sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: var(--sidebar-width);
+            background: var(--primary-color);
+            transition: transform var(--transition-speed) ease-in-out;
+            z-index: 100;
         }
-        .card {
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        /* CSS now targets the class on the <html> element */
+        html.sidebar-collapsed #sidebar {
+            transform: translateX(calc(-1 * var(--sidebar-width)));
         }
-        .table-responsive {
-            border-radius: 10px;
-            overflow: hidden;
+
+        #content {
+            padding: 20px;
+            margin-left: var(--sidebar-width);
+            transition: margin-left var(--transition-speed) ease-in-out;
         }
-        .table thead th {
-            background-color: var(--primary-color);
+        html.sidebar-collapsed #content {
+            margin-left: 0;
+        }
+
+        #sidebarCollapse {
+            position: fixed;
+            bottom: 25px;
+            left: calc(var(--sidebar-width) - 45px);
+            background: #fff;
+            border: 1px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            cursor: pointer;
+            z-index: 1100;
+            transition: left var(--transition-speed) ease-in-out, transform var(--transition-speed) ease-in-out;
+        }
+        html.sidebar-collapsed #sidebarCollapse {
+            left: 20px;
+        }
+        #sidebarCollapse:hover {
+            transform: scale(1.1);
+        }
+        #sidebarCollapse i {
+             color: var(--primary-color);
+        }
+        
+        .sidebar-header { padding: 20px; }
+        #sidebar ul.components { padding: 20px 0; }
+        #sidebar ul li a { padding: 15px 20px; font-size: 1.1em; display: block; color: #fff; text-decoration: none; }
+
+        /* Chatbot Styles */
+        .chatbot-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+
+        .chatbot-button {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: #2265ca;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(34, 101, 202, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .chatbot-button:hover {
+            background-color: #1a52a8;
+            transform: scale(1.1);
+            box-shadow: 0 6px 16px rgba(34, 101, 202, 0.6);
+        }
+
+        .chatbot-button i {
             color: white;
+            font-size: 28px;
         }
-        #map {
-            height: 400px;
-            margin-bottom: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+
+        .chatbot-window {
+            position: fixed;
+            bottom: 90px;
+            right: 20px;
+            width: 40%;
+            height: 550px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            animation: slideUp 0.3s ease;
         }
-        .device-marker {
-            text-align: center;
+
+        .chatbot-window.active {
+            display: flex;
         }
-        .device-marker .status {
-            font-weight: bold;
-            margin-top: 5px;
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
-        .status-online {
-            color: #28a745;
+
+        .chatbot-header {
+            background: linear-gradient(135deg, #2265ca 0%, #1a52a8 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        .status-offline {
-            color: #dc3545;
+
+        .chatbot-header h4 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
         }
+
+        .chatbot-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .chatbot-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .chatbot-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.bot {
+            justify-content: flex-start;
+        }
+
+        .message-content {
+            white-space: pre-line;
+            max-width: 90%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: #2265ca;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot .message-content {
+            white-space: pre-line;
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+            text-align: right;
+        }
+
+        .message.bot .message-time {
+            text-align: left;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 12px 16px;
+            background: white;
+            border-radius: 12px;
+            width: fit-content;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .typing-indicator.active {
+            display: block;
+        }
+
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            background: #2265ca;
+            border-radius: 50%;
+            display: inline-block;
+            margin: 0 2px;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
+        .chatbot-input {
+            padding: 16px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chatbot-input input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 24px;
+            outline: none;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .chatbot-input input:focus {
+            border-color: #2265ca;
+        }
+
+        .chatbot-input button {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: #2265ca;
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .chatbot-input button:hover:not(:disabled) {
+            background: #1a52a8;
+            transform: scale(1.05);
+        }
+
+        .chatbot-input button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .chatbot-window {
+                width: calc(100vw - 40px);
+                height: calc(100vh - 120px);
+                right: 20px;
+                bottom: 90px;
+            }
+            
+            .chatbot-container {
+                bottom: 15px;
+                right: 15px;
+            }
+            
+            .chatbot-button {
+                width: 56px;
+                height: 56px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .chatbot-window {
+                width: 100vw;
+                height: 100vh;
+                right: 0;
+                bottom: 0;
+                border-radius: 0;
+            }
+            
+            .chatbot-container {
+                bottom: 20px;
+                right: 20px;
+            }
+        }
+
     </style>
 </head>
 <body>
     <div class="wrapper">
-        <!-- Sidebar -->
         <nav id="sidebar">
             <div class="sidebar-header">
                 <h3>POC TANTO CAT 1</h3>
                 <p>IoT Device Management</p>
             </div>
-
             <ul class="list-unstyled components">
-                <li class="{{ 'active' if request.url.path == '/dashboard' else '' }}">
-                    <a href="/dashboard">
-                        <i class="fas fa-tachometer-alt"></i>
-                        <span>Dashboard</span>
-                    </a>
+                <li class="{{ 'active' if request.url.path == '/dashboard' or request.url.path == '/solar-dashboard' else '' }}">
+                    <a href="/dashboard"><i class="fas fa-tachometer-alt me-2"></i><span>Dashboard</span></a>
                 </li>
                 <li class="{{ 'active' if request.url.path == '/insert' else '' }}">
-                    <a href="/insert">
-                        <i class="fas fa-plus-circle"></i>
-                        <span>Add New Device</span>
-                    </a>
+                    <a href="/insert"><i class="fas fa-plus-circle me-2"></i><span>Add New Device</span></a>
                 </li>
                 <li class="{{ 'active' if request.url.path == '/geofence' else '' }}">
-                    <a href="/geofence">
-                        <i class="fas fa-draw-polygon"></i>
-                        <span>Create Geofence</span>
-                    </a>
+                    <a href="/geofence"><i class="fas fa-draw-polygon me-2"></i><span>Create Geofence</span></a>
                 </li>
             </ul>
-
-            <button type="button" id="sidebarCollapse" class="btn">
-                <i class="fas fa-chevron-left"></i>
-            </button>
         </nav>
 
-        <!-- Page Content -->
         <div id="content">
+            <button type="button" id="sidebarCollapse" class="btn" title="Toggle Sidebar">
+                <i class="fas fa-chevron-left"></i>
+            </button>
             <div class="container-fluid px-4">
                 {% block content %}{% endblock %}
             </div>
         </div>
     </div>
+    <!-- Chatbot Widget -->
+    <div class="chatbot-container">
+        <button class="chatbot-button" id="chatbotToggle" aria-label="Open Chat">
+            <i class="fas fa-comments"></i>
+        </button>
+        
+        <div class="chatbot-window" id="chatbotWindow">
+            <div class="chatbot-header">
+                <h4><i class="fas fa-robot me-2"></i>AI Assistant</h4>
+                <button class="chatbot-close" id="chatbotClose" aria-label="Close Chat">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="chatbot-messages" id="chatbotMessages">
+                <div class="message bot">
+                    <div class="message-content">
+                        Halo! Saya AI Assistant. Bagaimana saya bisa membantu Anda hari ini?
+                        <div class="message-time" id="welcomeTime"></div>
+                    </div>
+                </div>
+                <div class="typing-indicator" id="typingIndicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+            
+            <div class="chatbot-input">
+                <input 
+                    type="text" 
+                    id="chatbotInput" 
+                    placeholder="Ketik pesan Anda..."
+                    autocomplete="off"
+                />
+                <button id="chatbotSend" aria-label="Send Message">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
 
-    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const sidebar = document.getElementById('sidebar');
-            const content = document.getElementById('content');
             const sidebarCollapse = document.getElementById('sidebarCollapse');
-            
+            const collapseIcon = sidebarCollapse.querySelector('i');
+            const htmlElement = document.documentElement;
+
+            // Set the initial icon state based on the class set by the inline script
+            if (htmlElement.classList.contains('sidebar-collapsed')) {
+                collapseIcon.classList.remove('fa-chevron-left');
+                collapseIcon.classList.add('fa-chevron-right');
+            }
+
+            // The click listener now toggles the class on the <html> element
             sidebarCollapse.addEventListener('click', function() {
-                sidebar.classList.toggle('active');
-                content.classList.toggle('active');
-                this.querySelector('i').classList.toggle('fa-chevron-left');
-                this.querySelector('i').classList.toggle('fa-chevron-right');
+                htmlElement.classList.toggle('sidebar-collapsed');
+
+                if (htmlElement.classList.contains('sidebar-collapsed')) {
+                    localStorage.setItem('sidebarState', 'collapsed');
+                    collapseIcon.classList.remove('fa-chevron-left');
+                    collapseIcon.classList.add('fa-chevron-right');
+                } else {
+                    localStorage.setItem('sidebarState', 'expanded');
+                    collapseIcon.classList.remove('fa-chevron-right');
+                    collapseIcon.classList.add('fa-chevron-left');
+                }
+            });
+
+            // The map resize listener remains the same
+            sidebar.addEventListener('transitionend', () => {
+                if (window.map) {
+                    window.map.invalidateSize();
+                }
             });
         });
     </script>
-    {% block scripts %}{% endblock %}
+    {% block scripts %}
+
+    <script>
+(function() {
+    const chatbotToggle = document.getElementById('chatbotToggle');
+    const chatbotWindow = document.getElementById('chatbotWindow');
+    const chatbotClose = document.getElementById('chatbotClose');
+    const chatbotInput = document.getElementById('chatbotInput');
+    const chatbotSend = document.getElementById('chatbotSend');
+    const chatbotMessages = document.getElementById('chatbotMessages');
+    const typingIndicator = document.getElementById('typingIndicator');
+
+    document.getElementById('welcomeTime').textContent = new Date().toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    chatbotToggle.addEventListener('click', () => {
+        chatbotWindow.classList.add('active');
+        chatbotInput.focus();
+    });
+
+    chatbotClose.addEventListener('click', () => {
+        chatbotWindow.classList.remove('active');
+    });
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 🔥 Formatter pintar (super clean)
+    function formatResponse(data) {
+        // Jika response berupa teks biasa
+        if (typeof data === "string") {
+            return escapeHtml(data);
+        }
+
+        // Jika response berupa array
+        if (Array.isArray(data)) {
+            let out = `<b>Ditemukan ${data.length} data:</b><br><br>`;
+            data.forEach((item, index) => {
+                out += `<b>${index + 1}.</b><br>`;
+                for (const key in item) {
+                    out += `<span style="margin-left:10px">${escapeHtml(key)}: ${escapeHtml(item[key])}</span><br>`;
+                }
+                out += `<hr>`;
+            });
+            return out;
+        }
+
+        // Jika response berupa object
+        if (typeof data === "object" && data !== null) {
+            let out = "";
+            for (const key in data) {
+                out += `${escapeHtml(key)}: ${escapeHtml(data[key])}<br>`;
+            }
+            return out;
+        }
+
+        return escapeHtml(String(data));
+    }
+
+    async function sendMessage() {
+        const message = chatbotInput.value.trim();
+        if (!message) return;
+
+        chatbotInput.disabled = true;
+        chatbotSend.disabled = true;
+
+        addMessage(message, 'user');
+        chatbotInput.value = '';
+
+        typingIndicator.classList.add('active');
+        scrollToBottom();
+
+        try {
+            const response = await fetch('/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    timestamp: new Date().toISOString()
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            typingIndicator.classList.remove('active');
+
+            // 🔥 Tangani semua jenis data supaya rapi
+            const formatted = formatResponse(data.response);
+
+            addMessage(formatted, 'bot');
+
+        } catch (error) {
+            typingIndicator.classList.remove('active');
+            addMessage('Maaf, terjadi kesalahan. Silakan coba lagi.', 'bot');
+        } finally {
+            chatbotInput.disabled = false;
+            chatbotSend.disabled = false;
+            chatbotInput.focus();
+        }
+    }
+
+    function addMessage(text, sender) {
+        const msg = document.createElement('div');
+        msg.className = `message ${sender}`;
+
+        const time = new Date().toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        msg.innerHTML = `
+            <div class="message-content">
+                ${text}
+                <div class="message-time">${time}</div>
+            </div>
+        `;
+
+        chatbotMessages.insertBefore(msg, typingIndicator);
+        scrollToBottom();
+    }
+
+    function scrollToBottom() {
+        chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
+    }
+
+    chatbotSend.addEventListener('click', sendMessage);
+
+    chatbotInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+})();
+
+    </script>
+
+    {% endblock %}
 </body>
 </html>

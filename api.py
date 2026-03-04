@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Form
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel
 import db_connection as db
 import requests
+from LLM_Logic.load_ai import ask_ai
+from LLM_Logic.query_router import handle_query
 
 app = FastAPI(title="Device Registration API")
 
@@ -12,6 +14,10 @@ GOOGLE_MAPS_API_KEY = "AIzaSyAdidNhffYHTMN60gs6oiXcqpyrmE8vpf0"  # Ganti dengan 
 class Device(BaseModel):
     imei: str
     serial_number: str
+
+class ChatMessage(BaseModel):
+    message: str
+    timestamp: str
 
 _device_cache = {}
 _last_cache_update = None
@@ -27,6 +33,208 @@ def get_cached_devices():
         _last_cache_update = now
     
     return _device_cache
+
+@app.post("/ask")
+async def ask(message: ChatMessage):
+    """
+    Endpoint chatbot yang menggabungkan query handler dan AI
+    """
+    user_input = message.message
+    
+    print(f"[API /ask] Received message: {user_input}")
+    
+    # Coba handle dengan query handler dulu
+    query_response = await handle_query(user_input)
+    
+    if query_response is not None:
+        print(f"[API /ask] Query handler returned: {type(query_response)}")
+        
+        # Jika ada hasil dari query handler, format response
+        if isinstance(query_response, int):
+            # Response adalah angka (device count)
+            return {"response": f"Total device: {query_response}"}
+        
+        elif isinstance(query_response, dict) and 'breakdown' in query_response:
+            # Format untuk device count dengan breakdown
+            total = query_response.get('total', 0)
+            ble = query_response.get('ble', 0)
+            solar = query_response.get('solar', 0)
+            
+            response_text = f"Total device: {total}\n"
+            response_text += f"- Device BLE: {ble}\n"
+            response_text += f"- Device Solar Tracker: {solar}"
+            
+            return {"response": response_text}
+        
+        elif isinstance(query_response, dict) and 'absolute_latest' in query_response:
+            # Format untuk single device dengan absolute latest + per category
+            summary = f"IMEI: {query_response.get('imei')}\n"
+            summary += f"Serial: {query_response.get('serial_number', 'N/A')}\n"
+            
+            if query_response.get('last_activity'):
+                summary += f"Activity: {query_response.get('last_activity')}\n"
+            
+            summary += "\n=== DATA TERBARU (OVERALL) ===\n"
+            abs_latest = query_response['absolute_latest']
+            summary += f"Type: {abs_latest['type']}\n"
+            summary += f"Timestamp: {abs_latest['timestamp']}\n"
+            
+            # Show relevant fields from absolute latest
+            data = abs_latest['data']
+            if data.get('alarm'):
+                summary += f"Alarm: {data.get('alarm')}\n"
+            if data.get('latitude') and data.get('longitude'):
+                summary += f"Location: ({data.get('latitude')}, {data.get('longitude')})\n"
+            if data.get('persentase_baterai') is not None:
+                summary += f"Battery: {data.get('persentase_baterai')}%\n"
+            if data.get('voltage'):
+                summary += f"Voltage: {data.get('voltage')}V\n"
+            
+            # Show per-category latest data
+            if query_response.get('latest_per_category'):
+                summary += "\n=== DATA TERBARU PER KATEGORI ===\n"
+                
+                for category, cat_data in query_response['latest_per_category'].items():
+                    summary += f"\n{category}:\n"
+                    summary += f"  Timestamp: {cat_data.get('timestamp')}\n"
+                    
+                    if category == 'GPS':
+                        if cat_data.get('latitude') and cat_data.get('longitude'):
+                            summary += f"  Location: ({cat_data.get('latitude')}, {cat_data.get('longitude')})\n"
+                    
+                    elif category == 'Heartbeat':
+                        if cat_data.get('persentase_baterai') is not None:
+                            summary += f"  Battery: {cat_data.get('persentase_baterai')}%\n"
+                        if cat_data.get('voltage'):
+                            summary += f"  Voltage: {cat_data.get('voltage')}V\n"
+                    
+                    elif category == 'Beacon':
+                        if cat_data.get('parsed_data'):
+                            summary += f"  Data: {cat_data.get('parsed_data')}\n"
+                    
+                    elif category == 'Alarm':
+                        if cat_data.get('alarm'):
+                            summary += f"  Alarm: {cat_data.get('alarm')}\n"
+                    
+                    elif category == 'Solar':
+                        if cat_data.get('persentase_baterai') is not None:
+                            summary += f"  Battery: {cat_data.get('persentase_baterai')}%\n"
+                        if cat_data.get('speed_kmh') is not None:
+                            summary += f"  Speed: {cat_data.get('speed_kmh')} km/h\n"
+                        if cat_data.get('g_sensor_status') is not None:
+                            status = "Vibrate" if cat_data.get('g_sensor_status') == 1 else "Static"
+                            summary += f"  G-Sensor: {status}\n"
+            
+            return {"response": summary.strip()}
+        
+        elif isinstance(query_response, list):
+            # Format list data menjadi text yang readable
+            if len(query_response) == 0:
+                return {"response": "Tidak ada data yang ditemukan."}
+            
+            # Tampilkan SEMUA data tanpa batasan
+            summary = f"Ditemukan {len(query_response)} data:\n\n"
+            for i, item in enumerate(query_response, 1):
+                summary += f"{i}. {format_item(item)}\n"
+            
+            return {"response": summary}
+        
+        elif isinstance(query_response, dict) and 'grouped' in query_response:
+            summary = f"Ditemukan {query_response.get('total', 0)} data:\n\n"
+            
+            for group_name, items in query_response.get('groups', {}).items():
+                if items:
+                    summary += f"=== {group_name} ===\n"
+                    for i, item in enumerate(items, 1):
+                        summary += f"{i}. {format_item(item)}\n"
+                    summary += "\n"
+
+            return {"response": summary.strip()}  # <-- multiline aman
+
+        
+        elif isinstance(query_response, str):
+            return {"response": query_response}
+        
+        else:
+            return {"response": str(query_response)}
+    
+    print(f"[API /ask] Forwarding to AI")
+    response = ask_ai(user_input)
+    return {"response": response}
+
+def format_item(item: dict) -> str:
+    """Format dictionary menjadi output multiline yang rapi"""
+
+    # Helper untuk rapikan key:value
+    def multiline_output(data: dict):
+        lines = []
+        for key, value in data.items():
+            if value is not None:
+                key_clean = key.replace("_", " ").lower()
+                lines.append(f"  {key_clean}: {value}")
+        return "\n" + "\n".join(lines)
+
+    # ==========================
+    # FORMAT DEVICE BLE & SOLAR
+    # ==========================
+    if 'imei' in item and 'device_type' in item:
+        data = {
+            "imei": item.get("imei"),
+            "serial": item.get("serial_number", "N/A"),
+            "activity": item.get("last_activity"),
+            "location": f"({item.get('latitude')}, {item.get('longitude')})"
+                if item.get('latitude') and item.get('longitude') else None,
+            "battery": f"{item.get('battery')}%" if item.get('battery') is not None else None,
+            "voltage": f"{item.get('voltage')}V" if item.get('voltage') else None,
+            "speed": f"{item.get('speed_kmh')} km/h" if item.get('speed_kmh') is not None else None,
+            "g sensor": "Vibrate" if item.get('g_sensor_status') == 1
+                else "Static" if item.get('g_sensor_status') is not None else None,
+            "last update": item.get('timestamp')
+                or item.get('gps_timestamp')
+                or item.get('heartbeat_timestamp')
+        }
+
+        return multiline_output(data)
+
+    # ==========================
+    # FORMAT FALLBACK DEVICE SIMPLE
+    # ==========================
+    elif 'imei' in item:
+        data = {
+            "imei": item.get("imei"),
+            "serial": item.get("serial_number", "N/A")
+        }
+        return multiline_output(data)
+
+    # ==========================
+    # FORMAT DATA REGISTRASI
+    # ==========================
+    elif 'payload_id_1' in item:
+        data = {
+            "imei": item.get("payload_id_1"),
+            "type": item.get("payload_id_2", "N/A"),
+            "time": item.get("timestamp", "N/A"),
+            "battery": f"{item.get('persentase_baterai')}%" if item.get("persentase_baterai") else None,
+            "location": f"({item.get('latitude')}, {item.get('longitude')})"
+                if item.get('latitude') and item.get('longitude') else None
+        }
+        return multiline_output(data)
+
+    # ==========================
+    # FORMAT GENERIC (5 ITEM SAJA)
+    # ==========================
+    else:
+        trimmed = {}
+        count = 0
+        for k, v in item.items():
+            if v is not None and v != "":
+                trimmed[k] = v
+                count += 1
+            if count >= 5:
+                break
+
+        return multiline_output(trimmed)
+
 
 @app.get("/device-info/{imei}")
 async def get_device_info(imei: str):
@@ -74,28 +282,43 @@ async def get_registration_by_imei(imei: str):
     
     return {"data": processed_data}
 
-@app.get("/registration/{imei}/date-range")
+@app.post("/registration/{imei}/date-range")
 async def get_registration_by_date_range(
     imei: str,
-    start_date: datetime,
-    end_date: datetime
+    start_date: str = Form(...),
+    end_date: str = Form(...)
 ):
-    # Validasi tanggal
-    if end_date < start_date:
+    """
+    Get registration data by IMEI and date range using form data
+    Date format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS
+    """
+    try:
+        # Parse date strings to datetime objects
+        # Support both formats: "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM:SS"
+        start_dt = datetime.strptime(start_date.replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+        end_dt = datetime.strptime(end_date.replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+    except ValueError as e:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
+            detail=f"Invalid date format. Use 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DDTHH:MM:SS'. Error: {str(e)}"
+        )
+    
+    # Validasi tanggal
+    if end_dt < start_dt:
+        raise HTTPException(
+            status_code=400,
             detail="Invalid date range: end_date cannot be earlier than start_date"
         )
     
-    data = db.get_registration_data_by_date_range(imei, start_date, end_date)
+    data = db.get_registration_data_by_date_range(imei, start_dt, end_dt)
     if data is None:
         raise HTTPException(status_code=404, detail="Data not found")
     
     return {
         "data": data,
         "meta": {
-            "start_date": start_date.strftime('%Y-%m-%d %H:%M:%S'),
-            "end_date": end_date.strftime('%Y-%m-%d %H:%M:%S'),
+            "start_date": start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            "end_date": end_dt.strftime('%Y-%m-%d %H:%M:%S'),
             "total_records": len(data) if data else 0
         }
     }
@@ -386,3 +609,79 @@ async def get_solar_tracker_data_api(
         raise HTTPException(status_code=500, detail="Failed to fetch solar tracker data")
     
     return {"data": data, "count": len(data)}
+
+@app.get("/solar-tracker/{imei}/latest-gps")
+async def get_solar_tracker_latest_gps(imei: str):
+    """Get latest GPS data from solar tracker device by IMEI."""
+    data = db.get_solar_tracker_latest_gps(imei)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"No GPS data found for solar tracker IMEI: {imei}")
+    
+    return {
+        "imei": imei,
+        "data": data,
+        "timestamp": data.get('timestamp')
+    }
+
+@app.get("/solar-tracker/{imei}/latest")
+async def get_solar_tracker_latest_data(imei: str):
+    """Get latest data from solar tracker device by IMEI (all data types)."""
+    data = db.get_solar_tracker_latest_data(imei)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"No data found for solar tracker IMEI: {imei}")
+    
+    return {
+        "imei": imei,
+        "data": data,
+        "timestamp": data.get('timestamp')
+    }
+
+@app.get("/solar-tracker/{imei}")
+async def get_solar_tracker_all_data_by_imei(imei: str):
+    """Get all data from solar tracker device by IMEI."""
+    data = db.get_solar_tracker_data(imei=imei)
+    if data is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch solar tracker data")
+    
+    if not data:
+        raise HTTPException(status_code=404, detail=f"No data found for solar tracker IMEI: {imei}")
+    
+    return {
+        "imei": imei,
+        "data": data,
+        "count": len(data)
+    }
+
+@app.post("/devices/create")
+async def create_device_from_form(
+    device_type: str = Form(...),
+    imei: str = Form(...),
+    serial_number: Optional[str] = Form(None)
+):
+    """Creates a device from the web form submission."""
+    if device_type == 'solar':
+        success, message = db.insert_solar_device(imei)
+        if not success:
+            raise HTTPException(status_code=409 if "exists" in message else 500, detail=message)
+        return {"status": "success", "message": message}
+
+    elif device_type == 'tracker':
+        if not serial_number:
+            raise HTTPException(status_code=400, detail="Serial Number is required for a tracker device.")
+        success = db.insert_device_data(imei, serial_number)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to insert tracker device.")
+        return {"status": "success", "message": f"Tracker Device {imei} added successfully."}
+    
+    raise HTTPException(status_code=400, detail="Invalid device type specified.")
+
+@app.delete("/api/geofence/{geofence_id}")
+async def delete_geofence(geofence_id: int):
+    """Delete a geofence by its ID."""
+    success = db.delete_geofence(geofence_id)
+    if not success:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Failed to delete geofence with ID {geofence_id}. It may not exist."
+        )
+    return {"message": "Geofence deleted successfully."}

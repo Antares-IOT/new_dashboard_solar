@@ -57,139 +57,284 @@
     </div>
 </div>
 
-<script>
+<!-- <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize map
+
+    // === Inisialisasi peta geofence ===
     const map = L.map('geofenceMap').setView([-6.2088, 106.8456], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Initialize drawing features
-    const drawnItems = new L.FeatureGroup();
-    map.addLayer(drawnItems);
+    // === Peta geofence sudah ada: map ===
+    const deviceMarkers = new L.FeatureGroup().addTo(map);
 
-    const drawControl = new L.Control.Draw({
-        draw: {
-            marker: false,
-            circlemarker: false,
-            circle: false,
-            polyline: false,
-            rectangle: true,
-            polygon: true,
-        },
-        edit: {
-            featureGroup: drawnItems
+    async function loadDeviceCoordinates(imei = null, startDate = null, endDate = null) {
+        deviceMarkers.clearLayers(); // hapus marker sebelumnya
+
+        let url = `/solar-tracker/data`;
+        const params = new URLSearchParams();
+        if (imei) params.append('imei', imei);
+        if (startDate && endDate) {
+            params.append('start_date', startDate);
+            params.append('end_date', endDate);
         }
-    });
-    map.addControl(drawControl);
+        url += `?${params.toString()}`;
 
-    // Handle drawing events
-    map.on('draw:created', function(e) {
-        drawnItems.clearLayers();
-        const layer = e.layer;
-        drawnItems.addLayer(layer);
-        updateCoordinatesList(layer);
-    });
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Failed to fetch device data');
 
-    function updateCoordinatesList(layer) {
-        const coords = layer.getLatLngs()[0];
-        const list = document.getElementById('coordinatesList');
-        list.innerHTML = '';
-        
-        coords.forEach((coord, index) => {
-            const item = document.createElement('div');
-            item.className = 'list-group-item py-1';
-            item.textContent = `Point ${index + 1}: ${coord.lat.toFixed(6)}, ${coord.lng.toFixed(6)}`;
-            list.appendChild(item);
-        });
+            const data = await response.json();
+            if (!data || data.length === 0) return;
+
+            // --- LOGIKA FILTER ---
+            let displayData = data;
+
+            // Ambil titik terakhir per device hanya jika tidak ada filter sama sekali
+            if (!imei && !startDate && !endDate) {
+                const latestPerDevice = {};
+                data.forEach(item => {
+                    latestPerDevice[item.payload_id_1] = item;
+                });
+                displayData = Object.values(latestPerDevice);
+            }
+
+            displayData.forEach(item => {
+                if (item.latitude && item.longitude) {
+                    let markerColor = 'blue';
+                    if (item.alarm && item.alarm.toLowerCase().includes('door open')) {
+                        markerColor = 'red';
+                    }
+
+                    const marker = L.circleMarker([item.latitude, item.longitude], {
+                        radius: 8,
+                        fillColor: markerColor,
+                        color: markerColor,
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    });
+
+                    const popupContent = `
+                        <strong>IMEI:</strong> ${item.payload_id_1}<br>
+                        <strong>Model:</strong> ${item.device_model || '-'}<br>
+                        <strong>Timestamp:</strong> ${item.timestamp}<br>
+                        <strong>Battery:</strong> ${item.persentase_baterai || '-'}%<br>
+                        <strong>Speed:</strong> ${item.speed_kmh || 0} km/h<br>
+                        <strong>Alarm:</strong> ${item.alarm || '-'}<br>
+                        <strong>G Sensor:</strong> ${item.g_sensor_status || '-'}<br>
+                        <strong>Last Activity:</strong> ${item.last_activity || '-'}<br>
+                        <strong>City:</strong> ${item.city || '-'}
+                    `;
+                    marker.bindPopup(popupContent);
+                    deviceMarkers.addLayer(marker);
+                }
+            });
+
+            if (deviceMarkers.getLayers().length > 0) {
+                map.fitBounds(deviceMarkers.getBounds().pad(0.1));
+            }
+
+        } catch (err) {
+            console.error('Error loading device coordinates:', err);
+        }
     }
 
-    // Handle form submission
-    document.getElementById('geofenceForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
-        
-        if (drawnItems.getLayers().length === 0) {
-            alert('Please draw a geofence area on the map');
+
+    // --- Penggunaan default: semua device, titik terakhir per device ---
+    loadDeviceCoordinates();
+
+    // --- Optional: jika ada form filter IMEI + tanggal ---
+    const filterForm = document.getElementById('deviceFilterForm');
+    if (filterForm) {
+        filterForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const imei = document.getElementById('imeiInput').value || null;
+            const startDateVal = document.getElementById('startDate').value;
+            const endDateVal = document.getElementById('endDate').value;
+
+            let startDate = null, endDate = null;
+            if (startDateVal && endDateVal) {
+                startDate = startDateVal + ' 00:00:00';
+                endDate = endDateVal + ' 23:59:59';
+            }
+            loadDeviceCoordinates(imei, startDate, endDate);
+        });
+    }
+});
+
+
+</script> -->
+<script>
+
+const urlParams = new URLSearchParams(window.location.search);
+const imei = urlParams.get('imei');
+const startDate = urlParams.get('start_date');
+const endDate = urlParams.get('end_date');
+
+document.addEventListener('DOMContentLoaded', async function () {
+
+    const map = L.map('geofenceMap').setView([-6.2088, 106.8456], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    const markerGroup = L.featureGroup().addTo(map);
+
+    try {
+async function fetchGeofenceData() {
+
+    // === ALL DEVICES ===
+    if (!imei) {
+        const res = await fetch('/solar-tracker/devices');
+        const { devices } = await res.json();
+
+        const allData = [];
+
+        await Promise.all(devices.map(async d => {
+            const r = await fetch(`/solar-tracker/${d.imei}/latest`);
+            const j = await r.json();
+            if (j.data) allData.push(j.data);
+        }));
+
+        return allData;
+    }
+
+    // === IMEI SAJA / HISTORI ===
+    let url = `/solar-tracker/data?imei=${imei}`;
+    if (startDate && endDate) {
+        url += `&start_date=${startDate}&end_date=${endDate}`;
+    }
+
+    const res = await fetch(url);
+    const json = await res.json();
+    return json.data || [];
+}
+
+function getMarkerColor(item, latestTimestamp, mode) {
+    if (item.alarm?.toLowerCase().includes('door open')) return 'red';
+
+    if (mode === 'imei-only' && item.timestamp === latestTimestamp)
+        return 'green';
+
+    return 'blue';
+}
+
+
+       const data = await fetchGeofenceData();
+
+const latestPerImei = {};
+data.forEach(d => {
+    const key = d.payload_id_1 || d.imei;
+    if (!latestPerImei[key] ||
+        new Date(d.timestamp) > new Date(latestPerImei[key].timestamp)) {
+        latestPerImei[key] = d;
+    }
+});
+
+let displayData = data;
+
+// tampilkan latest per IMEI jika mode ALL
+if (!imei) {
+    displayData = Object.values(latestPerImei);
+}
+
+displayData.forEach(item => {
+    const imeiKey = item.payload_id_1 || item.imei;
+    if (!imeiKey) return;
+
+    const alarmStr = (item.alarm || '').toLowerCase();
+    const isDoorOpen = alarmStr.includes('door open');
+
+    const latlng = [item.latitude, item.longitude];
+
+    const triangleIcon = L.divIcon({
+        html: `<div style="
+            width:0;height:0;
+            border-left:10px solid transparent;
+            border-right:10px solid transparent;
+            border-bottom:20px solid red;
+        "></div>`,
+        className: '',
+        iconSize: [20, 20],
+        iconAnchor: [10, 20]
+    });
+
+    // === JIKA MARKER SUDAH ADA ===
+    if (markersByImei[imeiKey]) {
+        const oldMarker = markersByImei[imeiKey];
+
+        // 🚨 JIKA ALARM & MARKER LAMA BUKAN ICON
+        if (isDoorOpen && oldMarker instanceof L.CircleMarker) {
+            markerGroup.removeLayer(oldMarker);
+
+            const newMarker = L.marker(latlng, { icon: triangleIcon });
+            newMarker.bindPopup(oldMarker.getPopup().getContent());
+
+            markersByImei[imeiKey] = newMarker;
+            markerGroup.addLayer(newMarker);
             return;
         }
 
-        const layer = drawnItems.getLayers()[0];
-        const geofenceData = {
-            name: document.getElementById('geofenceName').value,
-            description: document.getElementById('geofenceDescription').value,
-            coordinates: layer.getLatLngs()[0].map(coord => ({
-                lat: coord.lat,
-                lng: coord.lng
-            }))
-        };
+        // ✅ JIKA NORMAL & MARKER LAMA ADALAH ICON
+        if (!isDoorOpen && !(oldMarker instanceof L.CircleMarker)) {
+            markerGroup.removeLayer(oldMarker);
 
-        try {
-            const response = await fetch('/api/geofence', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(geofenceData)
+            const newMarker = L.circleMarker(latlng, {
+                radius: 7,
+                color: 'blue',
+                fillColor: 'blue',
+                fillOpacity: 0.9
             });
+            newMarker.bindPopup(oldMarker.getPopup().getContent());
 
-            if (response.ok) {
-                alert('Geofence saved successfully');
-                loadGeofences();
-                resetForm();
-            } else {
-                alert('Failed to save geofence');
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('Error saving geofence');
+            markersByImei[imeiKey] = newMarker;
+            markerGroup.addLayer(newMarker);
+            return;
         }
-    });
 
-    function resetForm() {
-        document.getElementById('geofenceForm').reset();
-        drawnItems.clearLayers();
-        document.getElementById('coordinatesList').innerHTML = '';
+        // update posisi saja
+        oldMarker.setLatLng(latlng);
+        return;
     }
 
-    document.getElementById('resetDrawing').addEventListener('click', resetForm);
-
-    async function loadGeofences() {
-        try {
-            const response = await fetch('/api/geofence');
-            const geofences = await response.json();
-            
-            const list = document.getElementById('geofenceList');
-            list.innerHTML = '';
-
-            geofences.forEach(fence => {
-                const item = document.createElement('div');
-                item.className = 'list-group-item';
-                item.innerHTML = `
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="mb-1">${fence.name}</h6>
-                            <small class="text-muted">${fence.description || 'No description'}</small>
-                        </div>
-                        <button class="btn btn-sm btn-outline-danger delete-fence" data-id="${fence.id}">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-                list.appendChild(item);
-            });
-        } catch (error) {
-            console.error('Error loading geofences:', error);
-        }
+    // === MARKER BARU ===
+    let marker;
+    if (isDoorOpen) {
+        marker = L.marker(latlng, { icon: triangleIcon });
+    } else {
+        marker = L.circleMarker(latlng, {
+            radius: 7,
+            color: 'blue',
+            fillColor: 'blue',
+            fillOpacity: 0.9
+        });
     }
 
-    // Load existing geofences when page loads
-    loadGeofences();
-    
-    // Add refresh button handler
-    document.getElementById('refreshGeofences').addEventListener('click', loadGeofences);
+    marker.bindPopup(`
+        <strong>IMEI:</strong> ${imeiKey}<br>
+        <strong>Alarm:</strong> ${item.alarm || '-'}
+    `);
+
+    markersByImei[imeiKey] = marker;
+    markerGroup.addLayer(marker);
+});
+
+
+        if (markerGroup.getLayers().length > 0) {
+            map.fitBounds(markerGroup.getBounds().pad(0.2));
+        }
+
+    } catch (err) {
+        console.error('Geofence map error:', err);
+    }
 });
 </script>
+
+
+
+
 {% endblock %}
 
 {% block head_extra %}

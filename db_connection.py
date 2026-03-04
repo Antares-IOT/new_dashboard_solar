@@ -2,7 +2,7 @@ import pymysql
 from datetime import datetime, timedelta
 import json
 from shapely.geometry import Point, Polygon
-from typing import Optional
+from typing import Optional, List, Dict
 
 def create_connection():
     # Konfigurasi Database Lokal
@@ -26,6 +26,20 @@ def create_connection():
 
     except Exception as e:
         print(f"Error saat membuat koneksi: {str(e)}")
+        return None
+
+def create_solar_connection():
+    db_config = {
+        'host': 'localhost',
+        'user': 'dbadmin',
+        'password': 'DbAdmin123!',
+        'database': 'lansitec_solar_tracker'
+    }
+    try:
+        connection = pymysql.connect(**db_config)
+        return connection
+    except Exception as e:
+        print(f"Error saat membuat koneksi ke DB solar tracker: {str(e)}")
         return None
 
 def get_all_registration_data():
@@ -939,54 +953,295 @@ def get_solar_tracker_data(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     limit: Optional[int] = None
-):
-    """Mengambil data solar tracker dengan filter opsional."""
+) -> list:
+    """
+    Ambil data Solar Tracker dari DB.
+    - Jika imei diberikan -> ambil semua data untuk device tersebut (filter tanggal optional)
+    - Jika imei None -> ambil 1 record terakhir per device (All Devices)
+    - Limit optional untuk membatasi jumlah record (hanya berlaku untuk imei tertentu)
+    """
     connection = create_solar_connection()
-    if connection is None: return None
+    if connection is None:
+        return []
 
     try:
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
-            sql = """
-                SELECT
-                    d.imei AS payload_id_1, 'Solar Tracker' AS payload_id_2,
-                    lt.latitude, lt.longitude, lt.recorded_at AS timestamp,
-                    dh.voltage_percent AS persentase_baterai, dh.g_sensor_active AS g_sensor_status,
-                    lt.speed_kmh
-                FROM devices d
-                LEFT JOIN location_telemetry lt ON d.id = lt.device_id
-                LEFT JOIN device_health dh ON d.id = dh.device_id AND lt.recorded_at = dh.recorded_at
-            """
-            
-            where_clauses = ["(lt.recorded_at IS NOT NULL OR dh.recorded_at IS NOT NULL)"]
             params = []
 
             if imei:
-                where_clauses.append("d.imei = %s")
+                # Semua data untuk IMEI tertentu (filter tanggal optional)
+                sql = """
+                    SELECT
+                        d.imei AS payload_id_1,
+                        'Solar Tracker' AS payload_id_2,
+                        d.device_model,
+                        lt.latitude,
+                        lt.longitude,
+                        lt.recorded_at AS timestamp,
+                        dh.voltage_percent AS persentase_baterai,
+                        dh.g_sensor_active AS g_sensor_status,
+                        lt.speed_kmh,
+                        lt.alarm,
+                        lt.last_activity,
+                        lt.city,
+                        dh.is_charging
+                    FROM devices d
+                    LEFT JOIN location_telemetry lt ON d.id = lt.device_id
+                    LEFT JOIN device_health dh ON d.id = dh.device_id AND lt.recorded_at = dh.recorded_at
+                    WHERE d.imei = %s
+                """
                 params.append(imei)
-            
-            if start_date and end_date:
-                where_clauses.append("lt.recorded_at BETWEEN %s AND %s")
-                params.extend([start_date, end_date])
-            
-            if where_clauses:
-                sql += " WHERE " + " AND ".join(where_clauses)
-            
-            sql += " ORDER BY lt.recorded_at DESC"
-            
-            if limit:
-                sql += " LIMIT %s"
-                params.append(limit)
-            
+
+                if start_date and end_date:
+                    sql += " AND lt.recorded_at BETWEEN %s AND %s"
+                    params.extend([start_date, end_date])
+
+                    # histori → lama ke baru
+                    sql += " ORDER BY lt.recorded_at ASC"
+                else:
+                    # tanpa filter → terbaru dulu
+                    sql += " ORDER BY lt.recorded_at DESC"
+
+                if limit:
+                    sql += " LIMIT %s"
+                    params.append(limit)
+
+            else:
+                # All Devices -> 1 record terakhir per device
+                subquery = "SELECT device_id, MAX(recorded_at) AS latest_time FROM location_telemetry GROUP BY device_id"
+                sql = f"""
+                    SELECT
+                        d.imei AS payload_id_1,
+                        'Solar Tracker' AS payload_id_2,
+                        d.device_model,
+                        t1.latitude,
+                        t1.longitude,
+                        t1.recorded_at AS timestamp,
+                        dh.voltage_percent AS persentase_baterai,
+                        dh.g_sensor_active AS g_sensor_status,
+                        t1.speed_kmh,
+                        t1.alarm,
+                        t1.last_activity,
+                        t1.city,
+                        dh.is_charging
+                    FROM location_telemetry t1
+                    INNER JOIN ({subquery}) t2
+                        ON t1.device_id = t2.device_id AND t1.recorded_at = t2.latest_time
+                    LEFT JOIN devices d ON t1.device_id = d.id
+                    LEFT JOIN device_health dh ON dh.device_id = t1.device_id AND dh.recorded_at = t1.recorded_at
+                    ORDER BY t1.recorded_at DESC
+                """
+
             cursor.execute(sql, tuple(params))
             result = cursor.fetchall()
 
+            # Format timestamp
             for row in result:
                 if row.get('timestamp') and isinstance(row['timestamp'], datetime):
                     row['timestamp'] = row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+
             return result
 
     except Exception as e:
         print(f"Error getting solar tracker data: {str(e)}")
+        return []
+
+    finally:
+        if connection:
+            connection.close()
+
+
+def insert_solar_device(imei):
+    """Inserts a new solar tracker device by its IMEI."""
+    connection = create_solar_connection()
+    if connection is None:
+        print("Failed to establish connection to solar tracker database")
+        return False, "Database connection failed."
+
+    try:
+        with connection.cursor() as cursor:
+            # The 'devices' table in the solar tracker DB only needs the IMEI
+            sql = "INSERT INTO devices (imei) VALUES (%s)"
+            cursor.execute(sql, (imei,))
+            connection.commit()
+            return True, f"Solar Tracker {imei} added successfully."
+    except pymysql.err.IntegrityError:
+        # This error happens if the IMEI already exists
+        return False, f"Error: Solar tracker with IMEI {imei} already exists."
+    except Exception as e:
+        print(f"Error inserting solar tracker data: {str(e)}")
+        return False, f"An unexpected error occurred: {str(e)}"
+    finally:
+        if connection:
+            connection.close()
+
+def get_solar_tracker_latest_gps(imei: str):
+    """Get latest GPS data from solar tracker device by IMEI."""
+    connection = create_solar_connection()
+    if connection is None:
+        return None
+    
+    try:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            sql = """
+                SELECT
+                    d.imei,
+                    lt.latitude,
+                    lt.longitude,
+                    lt.speed_kmh,
+                    lt.recorded_at AS timestamp,
+                    lt.alarm,
+                    lt.last_activity,
+                    lt.city
+                FROM devices d
+                LEFT JOIN location_telemetry lt ON d.id = lt.device_id
+                WHERE d.imei = %s AND lt.recorded_at IS NOT NULL
+                ORDER BY lt.recorded_at DESC
+                LIMIT 1
+            """
+            cursor.execute(sql, (imei,))
+            result = cursor.fetchone()
+            
+            if result and result.get('timestamp'):
+                if isinstance(result['timestamp'], datetime):
+                    result['timestamp'] = result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+            
+            return result
+    except Exception as e:
+        print(f"Error getting solar tracker latest GPS: {str(e)}")
         return None
     finally:
-        if connection: connection.close()
+        if connection:
+            connection.close()
+
+# def get_solar_tracker_latest_data(imei: str):
+#     """Get latest data from solar tracker device by IMEI (all data types)."""
+#     connection = create_solar_connection()
+#     if connection is None:
+#         return None
+    
+#     try:
+#         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+#             sql = """
+#                 SELECT
+#                     d.imei,
+#                     d.imei AS serial_number,
+#                     lt.latitude,
+#                     lt.longitude,
+#                     lt.speed_kmh,
+#                     lt.recorded_at AS timestamp,
+#                     lt.alarm,
+#                     lt.last_activity,
+#                     lt.city,
+#                     dh.voltage_percent AS persentase_baterai,
+#                     dh.g_sensor_active AS g_sensor_status
+#                 FROM devices d
+#                 LEFT JOIN location_telemetry lt ON d.id = lt.device_id
+#                 LEFT JOIN device_health dh ON d.id = dh.device_id 
+#                     AND lt.recorded_at = dh.recorded_at
+#                 WHERE d.imei = %s
+#                 ORDER BY lt.recorded_at DESC, dh.recorded_at DESC
+#                 LIMIT 1
+#             """
+#             cursor.execute(sql, (imei,))
+#             result = cursor.fetchone()
+            
+#             if result and result.get('timestamp'):
+#                 if isinstance(result['timestamp'], datetime):
+#                     result['timestamp'] = result['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+            
+#             return result
+#     except Exception as e:
+#         print(f"Error getting solar tracker latest data: {str(e)}")
+#         return None
+#     finally:
+#         if connection:
+#             connection.close()
+
+def get_solar_tracker_latest_data(imei: str):
+    connection = create_solar_connection()
+    if not connection:
+        return None
+
+    try:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+
+            # 1️⃣ Ambil latest record
+            cursor.execute("""
+                SELECT
+                    d.imei,
+                    d.imei AS serial_number,
+                    lt.latitude,
+                    lt.longitude,
+                    lt.speed_kmh,
+                    lt.recorded_at AS timestamp,
+                    lt.alarm,
+                    lt.last_activity,
+                    lt.city,
+                    dh.voltage_percent AS persentase_baterai,
+                    dh.g_sensor_active AS g_sensor_status
+                FROM devices d
+                LEFT JOIN location_telemetry lt ON d.id = lt.device_id
+                LEFT JOIN device_health dh 
+                    ON d.id = dh.device_id
+                    AND lt.recorded_at = dh.recorded_at
+                WHERE d.imei = %s
+                ORDER BY lt.recorded_at DESC
+                LIMIT 1
+            """, (imei,))
+            latest = cursor.fetchone()
+
+            if not latest:
+                return None
+
+            # 2️⃣ fallback jika lat/lon 0 atau null
+            if not latest.get("latitude") or not latest.get("longitude") \
+               or latest["latitude"] == 0 or latest["longitude"] == 0:
+
+                cursor.execute("""
+                    SELECT latitude, longitude
+                    FROM location_telemetry lt
+                    JOIN devices d ON d.id = lt.device_id
+                    WHERE d.imei = %s
+                      AND lt.latitude != 0
+                      AND lt.longitude != 0
+                    ORDER BY lt.recorded_at DESC
+                    LIMIT 1
+                """, (imei,))
+                last_valid = cursor.fetchone()
+
+                if last_valid:
+                    latest["latitude"] = last_valid["latitude"]
+                    latest["longitude"] = last_valid["longitude"]
+
+            # format waktu
+            if isinstance(latest.get("timestamp"), datetime):
+                latest["timestamp"] = latest["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+
+            return latest
+
+    except Exception as e:
+        print("❌ SOLAR LATEST ERROR:", e)
+        return None
+    finally:
+        connection.close()
+
+def delete_geofence(geofence_id: int):
+    """Deletes a geofence by its ID."""
+    connection = create_connection()
+    if connection is None:
+        return False
+    
+    try:
+        with connection.cursor() as cursor:
+            sql = "DELETE FROM geofence WHERE id = %s"
+            cursor.execute(sql, (geofence_id,))
+            connection.commit()
+            # Check if any row was actually deleted
+            return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Error deleting geofence: {str(e)}")
+        return False
+    finally:
+        if connection:
+            connection.close()

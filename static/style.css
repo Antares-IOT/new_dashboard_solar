@@ -450,3 +450,171 @@ th:last-child, td:last-child {
     padding-left: 15px;
     border-left: 1px solid rgba(0,0,0,0.05);
 }
+
+/* Alarm Badge Colors - Enhanced visibility */
+.badge.alarm-door-open {
+    background-color: #dc3545 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+.badge.alarm-door-closed {
+    background-color: #28a745 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+.badge.alarm-normal {
+    background-color: #28a745 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+.badge.alarm-displace {
+    background-color: #fd7e14 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+.badge.alarm-low-voltage {
+    background-color: #ffc107 !important;
+    color: #000 !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+.badge.alarm-vibration {
+    background-color: #6f42c1 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+.badge.alarm-door-open-displace {
+    background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%) !important;
+    color: white !important;
+    font-weight: 600 !important;
+    padding: 0.5em 0.75em !important;
+    font-size: 0.85rem !important;
+}
+
+/* Add background color to table cells containing alarms for better visibility */
+td:has(.badge.alarm-door-open) {
+    background-color: rgba(220, 53, 69, 0.1) !important;
+}
+
+td:has(.badge.alarm-door-closed),
+td:has(.badge.alarm-normal) {
+    background-color: rgba(40, 167, 69, 0.1) !important;
+}
+
+td:has(.badge.alarm-displace) {
+    background-color: rgba(253, 126, 20, 0.1) !important;
+}
+
+td:has(.badge.alarm-low-voltage) {
+    background-color: rgba(255, 193, 7, 0.15) !important;
+}
+
+td:has(.badge.alarm-vibration) {
+    background-color: rgba(111, 66, 193, 0.1) !important;
+}
+
+td:has(.badge.alarm-door-open-displace) {
+    background-color: rgba(220, 53, 69, 0.1) !important;
+}
+
+/* Alarm Card Styles - for cards displaying alarm status */
+.card.alarm-card-door-open {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+    color: white !important;
+    border-color: #bd2130 !important;
+}
+
+.card.alarm-card-door-closed {
+    background: linear-gradient(135deg, #28a745 0%, #218838 100%) !important;
+    color: white !important;
+    border-color: #1e7e34 !important;
+}
+
+.card.alarm-card-normal {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
+    color: white !important;
+    border-color: #1e7e34 !important;
+}
+
+.card.alarm-card-displace {
+    background: linear-gradient(135deg, #fd7e14 0%, #e8590c 100%) !important;
+    color: white !important;
+    border-color: #dc6502 !important;
+}
+
+.card.alarm-card-low-voltage {
+    background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%) !important;
+    color: #000 !important;
+    border-color: #d39e00 !important;
+}
+
+.card.alarm-card-vibration {
+    background: linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%) !important;
+    color: white !important;
+    border-color: #4e2a84 !important;
+}
+
+.card.alarm-card-door-open-displace {
+    background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%) !important;
+    color: white !important;
+    border-color: #bd2130 !important;
+}
+
+/* Override text colors for alarm cards */
+.card.alarm-card-door-open h6,
+.card.alarm-card-door-open h3,
+.card.alarm-card-door-open h5,
+.card.alarm-card-door-closed h6,
+.card.alarm-card-door-closed h3,
+.card.alarm-card-door-closed h5,
+.card.alarm-card-normal h6,
+.card.alarm-card-normal h3,
+.card.alarm-card-normal h5,
+.card.alarm-card-displace h6,
+.card.alarm-card-displace h3,
+.card.alarm-card-displace h5,
+.card.alarm-card-vibration h6,
+.card.alarm-card-vibration h3,
+.card.alarm-card-vibration h5,
+.card.alarm-card-door-open-displace h6,
+.card.alarm-card-door-open-displace h3,
+.card.alarm-card-door-open-displace h5 {
+    color: white !important;
+}
+
+.card.alarm-card-low-voltage h6,
+.card.alarm-card-low-voltage h3,
+.card.alarm-card-low-voltage h5 {
+    color: #000 !important;
+}
+
+/* Override icon colors for alarm cards */
+.card.alarm-card-door-open i,
+.card.alarm-card-door-closed i,
+.card.alarm-card-normal i,
+.card.alarm-card-displace i,
+.card.alarm-card-vibration i,
+.card.alarm-card-door-open-displace i {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.card.alarm-card-low-voltage i {
+    color: rgba(0, 0, 0, 0.7) !important;
+}

@@ -3,9 +3,9 @@
 {% block content %}
 <div class="container py-5">
     <div class="row justify-content-center">
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header">
+        <div class="col-md-8 col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
                     <h4 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Insert New Device</h4>
                 </div>
                 <div class="card-body p-4">
@@ -15,17 +15,33 @@
                     </div>
                     {% endif %}
 
-                    <form method="POST">
+                    <form method="POST" id="insert-form">
+                        <div class="mb-4">
+                            <label class="form-label">Device Type</label>
+                            <div class="btn-group btn-group-toggle w-100" data-toggle="buttons">
+                                <label class="btn btn-outline-primary active">
+                                    <input type="radio" name="device_type" value="tracker" id="tracker-type" checked>
+                                    <i class="fas fa-satellite-dish me-2"></i> Tracker Device
+                                </label>
+                                <label class="btn btn-outline-success">
+                                    <input type="radio" name="device_type" value="solar" id="solar-type">
+                                    <i class="fas fa-solar-panel me-2"></i> Solar Tracker
+                                </label>
+                            </div>
+                        </div>
+
                         <div class="mb-3">
                             <label for="imei" class="form-label">IMEI</label>
-                            <input type="text" class="form-control" id="imei" name="imei" required>
+                            <input type="text" class="form-control" id="imei" name="imei" required placeholder="Enter the device IMEI">
                         </div>
-                        <div class="mb-3">
+
+                        <div class="mb-3" id="serial-number-wrapper">
                             <label for="serial_number" class="form-label">Serial Number</label>
-                            <input type="text" class="form-control" id="serial_number" name="serial_number" required>
+                            <input type="text" class="form-control" id="serial_number" name="serial_number" required placeholder="Enter the device serial number">
                         </div>
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary">
+
+                        <div class="d-grid gap-2 mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg">
                                 <i class="fas fa-save me-2"></i>Create Device
                             </button>
                             <a href="/dashboard" class="btn btn-secondary">
@@ -38,4 +54,35 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const trackerRadio = document.getElementById('tracker-type');
+    const solarRadio = document.getElementById('solar-type');
+    const serialNumberWrapper = document.getElementById('serial-number-wrapper');
+    const serialNumberInput = document.getElementById('serial_number');
+
+    // Function to update the form based on device type
+    const updateForm = () => {
+        if (solarRadio.checked) {
+            // If Solar Tracker is selected, hide the S/N field and make it not required
+            serialNumberWrapper.style.display = 'none';
+            serialNumberInput.removeAttribute('required');
+        } else {
+            // If Tracker Device is selected, show the S/N field and make it required
+            serialNumberWrapper.style.display = 'block';
+            serialNumberInput.setAttribute('required', 'required');
+        }
+    };
+
+    // Add event listeners to radio buttons
+    trackerRadio.addEventListener('change', updateForm);
+    solarRadio.addEventListener('change', updateForm);
+
+    // Run on page load to set the initial state
+    updateForm();
+});
+</script>
 {% endblock %}
