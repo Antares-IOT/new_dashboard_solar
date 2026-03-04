@@ -44,7 +44,7 @@
 FROM python:3.11-alpine
 
 # Set working directory
-# WORKDIR /app
+WORKDIR /app
 
 # Copy requirements terlebih dahulu
 COPY requirements.txt .
