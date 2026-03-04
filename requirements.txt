@@ -4,4 +4,5 @@ jinja2
 pandas
 requests
 pymysql
-shapely
+numpy==1.26.4
+shapely==2.0.1
