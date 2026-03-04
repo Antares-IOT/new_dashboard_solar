@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: new_dashboard_solar
+      - name: new_dashboard_solar_tracker
         uses: actions/checkout@v4
 
       - name: Deploy via SSH
